@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: planneros
-      POSTGRES_PASSWORD: planneros
-      POSTGRES_DB: planneros
+      POSTGRES_USER: plannerpad
+      POSTGRES_PASSWORD: plannerpad
+      POSTGRES_DB: plannerpad
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U planneros"]
+      test: ["CMD-SHELL", "pg_isready -U plannerpad"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -21,7 +21,7 @@ services:
     ports:
       - "1337:1337"
     environment:
-      DATABASE_URL: postgresql://planneros:planneros@db:5432/planneros
+      DATABASE_URL: postgresql://plannerpad:plannerpad@db:5432/plannerpad
       PORT: 1337
     depends_on:
       db:

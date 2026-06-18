@@ -303,10 +303,10 @@ function generateIcs(events, slug) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//PlannerNote//PlannerNote//EN',
+    'PRODID:-//PlannerPad//PlannerPad//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    `X-WR-CALNAME:PlannerNote - ${slug}`,
+    `X-WR-CALNAME:PlannerPad - ${slug}`,
   ];
 
   for (const ev of events) {
@@ -314,7 +314,7 @@ function generateIcs(events, slug) {
     const endDate = ev.endDate && ev.endDate >= ev.startDate ? ev.endDate : ev.startDate;
 
     lines.push('BEGIN:VEVENT');
-    lines.push(`UID:${ev.id}@plannernote`);
+    lines.push(`UID:${ev.id}@plannerpad`);
     lines.push(`DTSTAMP:${now}`);
 
     if (ev.allDay !== false) {
@@ -336,7 +336,7 @@ function generateIcs(events, slug) {
 
 /* ── Calendar panel ── */
 
-function CalendarPanel({ doc, slug }) {
+function CalendarPanel({ doc, slug, setCursor }) {
   const now = new Date();
   const [year,setYear]   = useState(now.getFullYear());
   const [month,setMonth] = useState(now.getMonth());
@@ -367,8 +367,8 @@ function CalendarPanel({ doc, slug }) {
   function prev() { if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); }
   function next() { if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); }
 
-  function openAddForm(date)  { if(draggingEventId) return; setForm({mode:'add',title:'',startDate:date,endDate:date,allDay:true,time:'',location:''}); }
-  function openEditForm(id,e) { e?.stopPropagation(); if(draggingEventId) return; const ev=events.find(ev=>ev.id===id); if(ev) setForm({mode:'edit',...ev}); }
+  function openAddForm(date)  { if(draggingEventId) return; setCursor?.(null, null); setForm({mode:'add',title:'',startDate:date,endDate:date,allDay:true,time:'',location:''}); }
+  function openEditForm(id,e) { e?.stopPropagation(); if(draggingEventId) return; const ev=events.find(ev=>ev.id===id); if(ev) { setCursor?.(null, null); setForm({mode:'edit',...ev}); } }
 
   function saveEvent() {
     if(!form?.title.trim()||!form.startDate) return;
@@ -868,7 +868,12 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       }
 
       isApplying.current = false;
-      if (hasFocus && savedOffset !== null) restoreCaretPos(el, savedOffset);
+      if (hasFocus && savedOffset !== null) {
+        // Chrome drops the selection (but not focus) when innerHTML is replaced.
+        // Re-assert focus before restoring so the cursor is actually visible.
+        el.focus({ preventScroll: true });
+        restoreCaretPos(el, savedOffset);
+      }
       updateStats();
       setDomVersion(v => v + 1);
     };
@@ -1532,10 +1537,78 @@ function ShareButton() {
   );
 }
 
+/* ── Room menu (leave / delete) ── */
+
+function DeleteModal({ roomName, onConfirm, onCancel }) {
+  const [typed, setTyped] = useState('');
+  const expected = `delete ${roomName}`;
+  const matches  = typed.trim().toLowerCase() === expected.toLowerCase();
+
+  return (
+    <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal">
+        <div className="modal__titlebar">⚠ DELETE ROOM</div>
+        <div className="modal__body">
+          <p className="modal__warning">
+            This will permanently delete <strong>{roomName}</strong> and all its data for everyone.
+          </p>
+          <p className="modal__prompt">
+            Type <span className="modal__code">delete {roomName}</span> to confirm:
+          </p>
+          <input
+            className="modal__input"
+            value={typed}
+            onChange={e => setTyped(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && matches) onConfirm(); if (e.key === 'Escape') onCancel(); }}
+            autoFocus
+            spellCheck={false}
+          />
+          <div className="modal__actions">
+            <button className="modal__btn" onClick={onCancel}>Cancel</button>
+            <button className="modal__btn modal__btn--danger" onClick={onConfirm} disabled={!matches}>
+              Delete Room
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoomMenu({ onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = e => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  return (
+    <div className="room-menu" ref={ref}>
+      <button
+        className="room-menu__trigger"
+        onClick={() => setOpen(o => !o)}
+        title="Room settings"
+      >···</button>
+      {open && (
+        <div className="room-menu__dropdown">
+          <button className="room-menu__item room-menu__item--danger" onClick={() => { setOpen(false); onDelete(); }}>
+            ✕ DELETE ROOM
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Room content ── */
 
 function RoomContent({ roomId, currentSlug, initialName }) {
   const { status, users, cursors, editorCursors, doc, synced, displayName, setDisplayName, setCursor, setEditorCursor } = useYjs(roomId);
+  const navigate = useNavigate();
   const [online, setOnline] = useState(navigator.onLine);
   const calendarRef = useRef(null);
   const throttleRef = useRef(0);
@@ -1563,18 +1636,51 @@ function RoomContent({ roomId, currentSlug, initialName }) {
     setCursor(null, null);
   }, [setCursor]);
 
+  // Observe the __meta map: any client that sets deleted=true causes all
+  // connected clients (including the deleter) to navigate home.
+  useEffect(() => {
+    if (!doc) return;
+    const meta = doc.getMap('__meta');
+    const check = () => {
+      if (meta.get('deleted')) navigate('/', { state: { deletedRoom: true } });
+    };
+    meta.observe(check);
+    return () => meta.unobserve(check);
+  }, [doc, navigate]);
+
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteRoomName,  setDeleteRoomName]  = useState('');
+
+  function handleLeave() {
+    navigate('/');
+  }
+
+  function openDeleteModal() {
+    const name = doc?.getText('roomName').toString() || initialName || currentSlug;
+    setDeleteRoomName(name);
+    setDeleteModalOpen(true);
+  }
+
+  function confirmDeleteRoom() {
+    setDeleteModalOpen(false);
+    fetch(`http://localhost:1337/api/rooms/${roomId}`, { method: 'DELETE', keepalive: true }).catch(() => {});
+    if (doc) { try { doc.getMap('__meta').set('deleted', true); } catch {} }
+  }
+
   return (
     <div className="room-shell">
       <div className="room">
         <div className="topbar">
-          <span className="topbar__logo">✦ PlannerNote</span>
+          <span className="topbar__logo">✦ PlannerPad</span>
           <NameEditor displayName={displayName} setDisplayName={setDisplayName}/>
           <ConnectionBadge status={status} online={online}/>
           <UserList users={users}/>
         </div>
         <div className="pathbar">
           <RoomNameEditor doc={doc} roomId={roomId} currentSlug={currentSlug} initialName={initialName || currentSlug}/>
+          <button className="pathbar__leave" onClick={handleLeave} title="Leave room">← LEAVE</button>
           <ShareButton/>
+          <RoomMenu onDelete={openDeleteModal}/>
         </div>
         <OfflineBanner status={status}/>
         <div className="panels">
@@ -1587,7 +1693,7 @@ function RoomContent({ roomId, currentSlug, initialName }) {
               onMouseMove={handleCalendarMouseMove}
               onMouseLeave={handleCalendarMouseLeave}
             >
-              {doc ? <CalendarPanel doc={doc} slug={currentSlug}/> : <div className="notes-connecting">Connecting...</div>}
+              {doc ? <CalendarPanel doc={doc} slug={currentSlug} setCursor={setCursor}/> : <div className="notes-connecting">Connecting...</div>}
               <CursorOverlay cursors={cursors}/>
             </div>
           </div>
@@ -1596,6 +1702,13 @@ function RoomContent({ roomId, currentSlug, initialName }) {
           </div>
         </div>
       </div>
+      {deleteModalOpen && (
+        <DeleteModal
+          roomName={deleteRoomName}
+          onConfirm={confirmDeleteRoom}
+          onCancel={() => setDeleteModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

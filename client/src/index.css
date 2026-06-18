@@ -191,6 +191,69 @@ body {
   box-shadow: 2px 2px 0px var(--danger-border);
 }
 
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  background: var(--text-1);
+  color: var(--surface);
+  font-family: 'Press Start 2P', cursive;
+  font-size: 8px;
+  padding: 10px 18px;
+  border-radius: var(--r-sm);
+  box-shadow: 4px 4px 0px rgba(0,0,0,0.3);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: toast-in 0.15s ease;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ── Join form ── */
+
+.boot-card__join {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.boot-card__join-label {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 7px;
+  color: var(--text-2);
+  line-height: 1.8;
+}
+
+.boot-card__join-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.boot-card__join-input {
+  flex: 1;
+  min-width: 0;
+  border: 2px solid var(--text-1);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-family: 'Nunito', sans-serif;
+  font-size: 12px;
+  color: var(--text-1);
+  background: var(--surface);
+  outline: none;
+  box-shadow: var(--px-shadow-sm);
+}
+
+.boot-card__join-input:focus  { border-color: var(--primary-dk); }
+.boot-card__join-input::placeholder { color: var(--text-2); font-style: italic; }
+
+.boot-card__join-btn { flex-shrink: 0; padding: 8px 14px; }
+
 /* ══════════════════ ROOM ══════════════════ */
 
 .room-shell {
@@ -381,7 +444,6 @@ body {
   align-items: center;
   gap: 10px;
   min-height: 34px;
-  overflow: hidden;
 }
 
 /* Room name (editable title in pathbar) */
@@ -432,6 +494,27 @@ body {
   flex-shrink: 1;
 }
 
+.pathbar__leave {
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 2px solid var(--text-1);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 6px;
+  color: var(--text-1);
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: var(--px-shadow-sm);
+  line-height: 1.6;
+}
+
+.pathbar__leave:hover {
+  background: var(--surface-2);
+  box-shadow: 1px 1px 0px var(--text-1);
+  transform: translate(1px, 1px);
+}
+
 .pathbar__share {
   margin-left: auto;
   flex-shrink: 0;
@@ -459,6 +542,68 @@ body {
   color: #15803D;
   background: var(--success-bg);
 }
+
+/* ── Room menu (··· leave / delete) ── */
+
+.room-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.room-menu__trigger {
+  background: var(--surface);
+  border: 2px solid var(--text-1);
+  border-radius: var(--r-sm);
+  padding: 3px 8px;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 8px;
+  color: var(--text-1);
+  cursor: pointer;
+  letter-spacing: 3px;
+  box-shadow: var(--px-shadow-sm);
+  line-height: 1.6;
+}
+
+.room-menu__trigger:hover {
+  background: var(--surface-2);
+  box-shadow: 1px 1px 0px var(--text-1);
+  transform: translate(1px, 1px);
+}
+
+.room-menu__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--surface);
+  border: 2px solid var(--text-1);
+  border-radius: var(--r);
+  box-shadow: var(--px-shadow);
+  min-width: 170px;
+  z-index: 200;
+  overflow: hidden;
+}
+
+.room-menu__item {
+  display: block;
+  width: 100%;
+  padding: 9px 14px;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 7px;
+  color: var(--text-1);
+  background: none;
+  border: none;
+  border-bottom: 2px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.room-menu__item:last-child  { border-bottom: none; }
+.room-menu__item:hover       { background: var(--surface-2); }
+
+.room-menu__item--danger       { color: var(--danger); }
+.room-menu__item--danger:hover { background: var(--danger-bg); }
 
 /* ══════════════════ PANELS ══════════════════ */
 
@@ -910,8 +1055,8 @@ body {
   content: '';
   display: block;
   position: absolute;
-  left: 1px; top: -2px;
-  width: 4px; height: 7px;
+  left: 2px; top: 0px;
+  width: 3px; height: 6px;
   border-right: 2px solid var(--text-1);
   border-bottom: 2px solid var(--text-1);
   transform: rotate(45deg);
@@ -1716,4 +1861,125 @@ body {
 .error-card__divider {
   border: none;
   border-top: 2px solid var(--border);
+}
+
+/* ── Delete confirmation modal ── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1500;
+}
+
+.modal {
+  background: var(--surface);
+  border: 2px solid var(--text-1);
+  border-radius: var(--r);
+  box-shadow: 4px 4px 0px var(--text-1);
+  width: 100%;
+  max-width: 380px;
+  margin: 16px;
+}
+
+.modal__titlebar {
+  background: var(--danger);
+  color: #fff;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 9px;
+  padding: 10px 14px;
+  letter-spacing: 1px;
+}
+
+.modal__body {
+  padding: 16px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal__warning {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 7px;
+  color: var(--text-1);
+  line-height: 1.8;
+  margin: 0;
+}
+
+.modal__prompt {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 7px;
+  color: var(--text-2);
+  line-height: 1.8;
+  margin: 0;
+}
+
+.modal__code {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 4px;
+  color: var(--text-1);
+  white-space: nowrap;
+}
+
+.modal__input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'Press Start 2P', cursive;
+  font-size: 7px;
+  padding: 7px 10px;
+  border: 2px solid var(--text-1);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  outline: none;
+  line-height: 1.6;
+}
+
+.modal__input:focus {
+  border-color: var(--primary);
+}
+
+.modal__actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal__btn {
+  font-family: 'Press Start 2P', cursive;
+  font-size: 7px;
+  padding: 7px 14px;
+  border: 2px solid var(--text-1);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-1);
+  cursor: pointer;
+  box-shadow: var(--px-shadow-sm);
+  line-height: 1.6;
+}
+
+.modal__btn:hover {
+  background: var(--surface-2);
+}
+
+.modal__btn--danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  box-shadow: 2px 2px 0px rgba(0,0,0,0.3);
+}
+
+.modal__btn--danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.modal__btn--danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
 }

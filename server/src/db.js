@@ -9,6 +9,15 @@ export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+const ROOM_ADJECTIVES = ['Spontaneous','Cozy','Chaotic','Breezy','Rainy','Midnight','Lazy','Golden','Sneaky','Sleepy','Wild','Quiet','Secret','Cloudy','Sunny'];
+const ROOM_NOUNS      = ['Road Trip','Brunch','Picnic','Cafe Run','Beach Day','Movie Night','Cabin Trip','Rooftop Party','Farmers Market','Bookstore Run','Thrift Haul','Hot Girl Walk','Karaoke Night','Ramen Run','Sleepover'];
+
+function randomRoomName() {
+  const adj  = ROOM_ADJECTIVES[Math.floor(Math.random() * ROOM_ADJECTIVES.length)];
+  const noun = ROOM_NOUNS[Math.floor(Math.random() * ROOM_NOUNS.length)];
+  return `${adj} ${noun}`;
+}
+
 function toSlug(name) {
   return name
     .toLowerCase()
@@ -30,7 +39,8 @@ export async function initSchema() {
       id UUID PRIMARY KEY,
       name TEXT NOT NULL DEFAULT 'Untitled Room',
       slug TEXT,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      last_active_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS documents (
@@ -48,6 +58,7 @@ export async function initSchema() {
   // No-op migrations for existing installs
   await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT 'Untitled Room'`);
   await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS slug TEXT`);
+  await pool.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP DEFAULT NOW()`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS rooms_slug_idx ON rooms (slug) WHERE slug IS NOT NULL`);
   // Back-fill slug for any rows that pre-date the slug column
   await pool.query(`UPDATE rooms SET slug = 'room-' || SUBSTRING(REPLACE(id::text, '-', ''), 1, 8) WHERE slug IS NULL`);
@@ -69,14 +80,15 @@ export async function getRoomBySlug(slug) {
 }
 
 export async function createRoom(roomId) {
-  const suffix = roomId.replace(/-/g, '').slice(0, 6);
-  const name   = 'Untitled Room';
-  const slug   = `untitled-room-${suffix}`;
+  const suffix   = roomId.replace(/-/g, '').slice(0, 6);
+  const name     = randomRoomName();
+  const baseSlug = toSlug(name);
+  const slug     = `${baseSlug}-${suffix}`;
   await pool.query(
     'INSERT INTO rooms (id, name, slug) VALUES ($1, $2, $3)',
     [roomId, name, slug]
   );
-  return slug;
+  return { slug, name };
 }
 
 export async function updateRoomSlug(roomId, name) {
@@ -114,4 +126,20 @@ export async function saveDocState(roomId, docType, state) {
      DO UPDATE SET ydoc_state = EXCLUDED.ydoc_state, updated_at = NOW()`,
     [roomId, docType, state]
   );
+  await pool.query(
+    'UPDATE rooms SET last_active_at = NOW() WHERE id = $1',
+    [roomId]
+  );
+}
+
+export async function deleteInactiveRooms() {
+  const { rowCount } = await pool.query(
+    `DELETE FROM rooms WHERE last_active_at < NOW() - INTERVAL '30 days'`
+  );
+  return rowCount ?? 0;
+}
+
+export async function deleteRoom(roomId) {
+  // documents rows cascade-delete via FK ON DELETE CASCADE
+  await pool.query('DELETE FROM rooms WHERE id = $1', [roomId]);
 }

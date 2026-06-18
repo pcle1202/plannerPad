@@ -7,10 +7,18 @@ const ADJECTIVES = ['Sleepy', 'Fuzzy', 'Calm', 'Brave', 'Happy', 'Gentle', 'Sill
 const ANIMALS    = ['Panda', 'Rabbit', 'Otter', 'Fox', 'Deer', 'Bear', 'Wolf', 'Owl', 'Cat', 'Dog', 'Hawk', 'Seal'];
 
 function initDisplayName() {
-  const saved = localStorage.getItem('plannernote_username');
-  if (saved) return saved;
-  const name = `${ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]} ${ANIMALS[Math.floor(Math.random() * ANIMALS.length)]}`;
-  localStorage.setItem('plannernote_username', name);
+  // User-chosen names persist across tabs; auto-generated ones are tab-scoped
+  if (localStorage.getItem('plannerpad_username_manual') === 'true') {
+    const saved = localStorage.getItem('plannerpad_username');
+    if (saved) return saved;
+  }
+  const tab = sessionStorage.getItem('plannerpad_tabname');
+  if (tab) return tab;
+  const adj    = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const animal = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+  const num    = Math.floor(Math.random() * 99) + 1;
+  const name   = `${adj[0].toLowerCase()}${adj.slice(1)}${animal}${num}`;
+  sessionStorage.setItem('plannerpad_tabname', name);
   return name;
 }
 
@@ -107,7 +115,9 @@ export function useYjs(roomId) {
   function setDisplayName(name) {
     const trimmed = name.trim();
     if (!trimmed) return;
-    localStorage.setItem('plannernote_username', trimmed);
+    localStorage.setItem('plannerpad_username', trimmed);
+    localStorage.setItem('plannerpad_username_manual', 'true');
+    sessionStorage.setItem('plannerpad_tabname', trimmed);
     setDisplayNameState(trimmed);
   }
 

@@ -3,7 +3,8 @@ import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { v4 as uuidv4 } from 'uuid';
-import { initSchema, createRoom, getRoomInfo, getRoomBySlug, updateRoomSlug } from './db.js';
+import cron from 'node-cron';
+import { initSchema, createRoom, getRoomInfo, getRoomBySlug, updateRoomSlug, deleteRoom, deleteInactiveRooms } from './db.js';
 import { setupYjsWebSocket } from './yjsServer.js';
 
 const app = express();
@@ -14,8 +15,8 @@ app.use(express.json());
 app.post('/api/rooms', async (req, res) => {
   try {
     const roomId = uuidv4();
-    const slug = await createRoom(roomId);
-    res.status(201).json({ roomId, slug });
+    const { slug, name } = await createRoom(roomId);
+    res.status(201).json({ roomId, slug, name });
   } catch (err) {
     console.error('create room error', err);
     res.status(500).json({ error: 'Failed to create room' });
@@ -59,6 +60,19 @@ app.put('/api/rooms/:roomId/name', async (req, res) => {
   }
 });
 
+// DELETE /api/rooms/:roomId — permanently delete a room and all its documents
+app.delete('/api/rooms/:roomId', async (req, res) => {
+  try {
+    const room = await getRoomInfo(req.params.roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    await deleteRoom(req.params.roomId);
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('delete room error', err);
+    res.status(500).json({ error: 'Failed to delete room' });
+  }
+});
+
 const server = createServer(app);
 setupYjsWebSocket(server);
 
@@ -67,7 +81,17 @@ const PORT = process.env.PORT || 1337;
 async function start() {
   await initSchema();
   server.listen(PORT, () => {
-    console.log(`PlannerOS server running on port ${PORT}`);
+    console.log(`PlannerPad server running on port ${PORT}`);
+  });
+
+  // Daily cleanup at 03:00 — delete rooms inactive for >30 days
+  cron.schedule('0 3 * * *', async () => {
+    try {
+      const count = await deleteInactiveRooms();
+      console.log(`[cleanup] Deleted ${count} inactive room(s)`);
+    } catch (err) {
+      console.error('[cleanup] Failed:', err);
+    }
   });
 }
 
