@@ -33,7 +33,7 @@ export default function HomeScreen() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('http://localhost:1337/api/rooms', { method: 'POST' });
+      const res = await fetch('/api/rooms', { method: 'POST' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { slug } = await res.json();
       navigate(`/room/${slug}`);
@@ -53,12 +53,12 @@ export default function HomeScreen() {
     try {
       let slug;
       if (UUID_RE.test(identifier)) {
-        const res  = await fetch(`http://localhost:1337/api/rooms/${identifier}`);
+        const res  = await fetch(`/api/rooms/${identifier}`);
         const data = await res.json();
         if (!data.exists) { setJoinError('Room not found'); setJoinLoading(false); return; }
         slug = data.slug;
       } else {
-        const res = await fetch(`http://localhost:1337/api/rooms/by-slug/${encodeURIComponent(identifier)}`);
+        const res = await fetch(`/api/rooms/by-slug/${encodeURIComponent(identifier)}`);
         if (!res.ok) { setJoinError('Room not found'); setJoinLoading(false); return; }
         const data = await res.json();
         slug = data.slug;

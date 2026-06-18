@@ -1494,7 +1494,7 @@ function RoomNameEditor({ doc, roomId, currentSlug, initialName }) {
     setName(trimmed);
     if (yName) doc.transact(() => { yName.delete(0, yName.length); yName.insert(0, trimmed); });
     try {
-      const res = await fetch(`http://localhost:1337/api/rooms/${roomId}/name`, {
+      const res = await fetch(`/api/rooms/${roomId}/name`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmed }),
       });
@@ -1663,7 +1663,7 @@ function RoomContent({ roomId, currentSlug, initialName }) {
 
   function confirmDeleteRoom() {
     setDeleteModalOpen(false);
-    fetch(`http://localhost:1337/api/rooms/${roomId}`, { method: 'DELETE', keepalive: true }).catch(() => {});
+    fetch(`/api/rooms/${roomId}`, { method: 'DELETE', keepalive: true }).catch(() => {});
     if (doc) { try { doc.getMap('__meta').set('deleted', true); } catch {} }
   }
 
@@ -1740,7 +1740,7 @@ export default function RoomScreen() {
     let cancelled = false;
 
     if (UUID_RE.test(identifier)) {
-      fetch(`http://localhost:1337/api/rooms/${identifier}`)
+      fetch(`/api/rooms/${identifier}`)
         .then(r=>r.json())
         .then(data => {
           if (cancelled) return;
@@ -1749,7 +1749,7 @@ export default function RoomScreen() {
         })
         .catch(()=>{ if(!cancelled) setRoomState('not-found'); });
     } else {
-      fetch(`http://localhost:1337/api/rooms/by-slug/${identifier}`)
+      fetch(`/api/rooms/by-slug/${identifier}`)
         .then(r=>{ if(!r.ok){setRoomState('not-found');return null;} return r.json(); })
         .then(data=>{ if(cancelled||!data) return; setRoomData({roomId:data.roomId,slug:identifier,name:data.name}); setRoomState('ready'); })
         .catch(()=>{ if(!cancelled) setRoomState('not-found'); });

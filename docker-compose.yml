@@ -27,5 +27,14 @@ services:
       db:
         condition: service_healthy
 
+  client:
+    build:
+      context: ./client
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
 volumes:
   pg_data:

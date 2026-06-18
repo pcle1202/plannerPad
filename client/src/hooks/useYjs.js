@@ -38,7 +38,8 @@ export function useYjs(roomId) {
     if (!roomId) return;
 
     const ydoc     = new Y.Doc();
-    const provider = new WebsocketProvider('ws://localhost:1337/yjs', roomId, ydoc);
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const provider = new WebsocketProvider(`${wsProto}//${window.location.host}/yjs`, roomId, ydoc);
     providerRef.current = provider;
 
     setDoc(ydoc);
