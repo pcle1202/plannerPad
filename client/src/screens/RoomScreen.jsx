@@ -580,7 +580,7 @@ function htmlToMarkdown(html) {
     switch (tag) {
       case 'h1': return `# ${kids}\n\n`;
       case 'h2': return `## ${kids}\n\n`;
-      case 'h6': return kids + '\n\n';
+      case 'h3': return `### ${kids}\n\n`;
       case 'p':  return kids ? kids+'\n\n' : '';
       case 'br': return '\n';
       case 'strong': case 'b': return `**${kids}**`;
@@ -1131,6 +1131,7 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
     if (editorRef.current) { editorRef.current.innerHTML = yXml.toString()||''; injectDragHandles(editorRef.current); }
     isApplying.current = false;
     if (editorRef.current) updateStats();
+    setDomVersion(v => v + 1);
     setCanUndo(mgr.undoStack.length>0); setCanRedo(mgr.redoStack.length>0);
   }
 
@@ -1142,6 +1143,7 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
     if (editorRef.current) { editorRef.current.innerHTML = yXml.toString()||''; injectDragHandles(editorRef.current); }
     isApplying.current = false;
     if (editorRef.current) updateStats();
+    setDomVersion(v => v + 1);
     setCanUndo(mgr.undoStack.length>0); setCanRedo(mgr.redoStack.length>0);
   }
 
@@ -1273,7 +1275,10 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
       // ul/ol li: empty item → exit list to paragraph
       const ulLi = el?.closest?.('li');
       if (ulLi) {
-        if (!ulLi.textContent.trim()) {
+        const ulLiText = [...ulLi.childNodes]
+          .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
+          .map(n => n.textContent).join('').trim();
+        if (!ulLiText) {
           e.preventDefault();
           const p = document.createElement('p'); p.innerHTML = '<br>';
           const list = ulLi.parentElement;
@@ -1399,8 +1404,11 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
       insertImageFile(img.getAsFile());
       return;
     }
-    // Plain text paste: let browser handle, then sync
-    requestAnimationFrame(() => syncToYjs());
+    // Always insert as plain text to strip external HTML formatting
+    e.preventDefault();
+    const text = e.clipboardData?.getData('text/plain') || '';
+    document.execCommand('insertText', false, text);
+    syncToYjs();
   }
 
   function handleDrop(e) {
