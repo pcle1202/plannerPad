@@ -151,22 +151,6 @@ function hexBrightness(hex) {
   return (r * 299 + g * 587 + b * 114) / 1000;
 }
 
-function PixelCursor({ color }) {
-  return (
-    <svg width="8" height="11" viewBox="0 0 16 22" xmlns="http://www.w3.org/2000/svg"
-      style={{ display: 'block' }}>
-      <polygon
-        points="1,1 1,18 5,14 8,20 11,19 8,13 14,13"
-        fill={color}
-        stroke="#1a1a1a"
-        strokeWidth="2"
-        strokeLinejoin="miter"
-        strokeLinecap="square"
-      />
-    </svg>
-  );
-}
-
 function CursorOverlay({ cursors }) {
   const [tick, setTick] = useState(0);
 
@@ -186,7 +170,6 @@ function CursorOverlay({ cursors }) {
     }}>
       {cursors.map(c => {
         const opacity = now - c.updatedAt > 1500 ? 0.2 : 1;
-        const textColor = hexBrightness(c.color) > 128 ? '#111' : '#fff';
         return (
           <div key={c.clientId} style={{
             position: 'absolute',
@@ -196,23 +179,13 @@ function CursorOverlay({ cursors }) {
             opacity,
             pointerEvents: 'none',
             userSelect: 'none',
+            transform: 'translate(-50%, -50%)',
           }}>
-            <PixelCursor color={c.color} />
             <div style={{
-              position: 'absolute',
-              left: '7px',
-              top: '6px',
-              fontFamily: "'Press Start 2P', monospace",
-              fontSize: '6px',
-              lineHeight: 1.5,
-              background: c.color + 'e6',
-              color: textColor,
-              padding: '2px 4px',
-              whiteSpace: 'nowrap',
-              border: '1px solid rgba(0,0,0,0.25)',
-            }}>
-              {c.name}
-            </div>
+              width: 10, height: 10, borderRadius: '50%',
+              background: c.color, border: '2px solid #fff',
+              boxShadow: `0 0 0 1px ${c.color}`,
+            }} />
           </div>
         );
       })}
@@ -336,7 +309,7 @@ function generateIcs(events, slug) {
 
 /* ── Calendar panel ── */
 
-function CalendarPanel({ doc, slug, setCursor }) {
+function CalendarPanel({ doc, slug, setCursor, exportRef }) {
   const now = new Date();
   const [year,setYear]   = useState(now.getFullYear());
   const [month,setMonth] = useState(now.getMonth());
@@ -378,10 +351,13 @@ function CalendarPanel({ doc, slug, setCursor }) {
       m.set('title',form.title.trim()); m.set('startDate',form.startDate); m.set('endDate',endDate);
       m.set('allDay',form.allDay); m.set('time',form.allDay?'':form.time); m.set('location',form.location||''); m.set('date',form.startDate);
     } else {
-      const id=genId(); const m=new Y.Map();
-      m.set('id',id); m.set('title',form.title.trim()); m.set('startDate',form.startDate); m.set('endDate',endDate);
-      m.set('allDay',form.allDay); m.set('time',form.allDay?'':form.time); m.set('location',form.location||''); m.set('sourceNoteId',''); m.set('date',form.startDate);
-      yEvents.set(id,m);
+      const id = genId();
+      doc.transact(() => {
+        const m = new Y.Map();
+        yEvents.set(id, m);
+        m.set('id', id); m.set('title', form.title.trim()); m.set('startDate', form.startDate); m.set('endDate', endDate);
+        m.set('allDay', form.allDay); m.set('time', form.allDay ? '' : form.time); m.set('location', form.location || ''); m.set('sourceNoteId', ''); m.set('date', form.startDate);
+      });
     }
     setForm(null);
   }
@@ -397,10 +373,13 @@ function CalendarPanel({ doc, slug, setCursor }) {
       const m=yEvents.get(data.id); if(m){m.set('startDate',date);m.set('endDate',newEnd);m.set('date',date);}
     }
     if(data.type==='ck-item' && data.text) {
-      const id=genId(); const m=new Y.Map();
-      m.set('id',id); m.set('title',data.text.slice(0,200)); m.set('startDate',date); m.set('endDate',date);
-      m.set('allDay',true); m.set('time',''); m.set('location',''); m.set('sourceNoteId',''); m.set('date',date);
-      yEvents.set(id,m);
+      const id = genId();
+      doc.transact(() => {
+        const m = new Y.Map();
+        yEvents.set(id, m);
+        m.set('id', id); m.set('title', data.text.slice(0, 200)); m.set('startDate', date); m.set('endDate', date);
+        m.set('allDay', true); m.set('time', ''); m.set('location', ''); m.set('sourceNoteId', ''); m.set('date', date);
+      });
     }
     setDraggingEventId(null);
   }
@@ -418,6 +397,9 @@ function CalendarPanel({ doc, slug, setCursor }) {
     URL.revokeObjectURL(a.href);
   }
 
+  // Expose latest handleExportIcs to parent via ref
+  useEffect(() => { if (exportRef) exportRef.current = handleExportIcs; });
+
   return (
     <div className="calendar"
       onDragEnter={e=>{if(e.dataTransfer.types.includes('application/x-ck-item'))setForeignDrag(true);}}
@@ -428,8 +410,8 @@ function CalendarPanel({ doc, slug, setCursor }) {
           <span>{MONTH_NAMES[month]} {year}</span>
           <button className="calendar__nav-btn" onClick={next}>NEXT ›</button>
         </div>
-        <button className="calendar__export-btn" onClick={handleExportIcs} title="Export all events as iCal (.ics)">.ICS</button>
       </div>
+      <div className="calendar__grid-wrap">
       <div className="calendar__weekdays">
         {WEEKDAY_LABELS.map(d=><div key={d} className="calendar__weekday">{d}</div>)}
       </div>
@@ -438,7 +420,6 @@ function CalendarPanel({ doc, slug, setCursor }) {
           {cells.map((cell,i) => {
             const isToday=cell.date===todayStr;
             const cellEvts=singleDayEvts.filter(ev=>ev.startDate===cell.date);
-            const shown=cellEvts.slice(0,2); const extra=cellEvts.length-shown.length;
             return (
               <div key={i} className={['cal-cell',cell.type!=='current'?'cal-cell--other':'',isToday?'cal-cell--today':'',dragOverDate===cell.date?'cal-cell--drag-over':''].filter(Boolean).join(' ')}
                 onClick={()=>cell.type==='current'&&openAddForm(cell.date)}
@@ -446,17 +427,18 @@ function CalendarPanel({ doc, slug, setCursor }) {
                 onDragLeave={e=>{if(!e.currentTarget.contains(e.relatedTarget))setDragOverDate(null);}}
                 onDrop={e=>handleCellDrop(e,cell.date)}>
                 <span className={`cal-cell__day${isToday?' cal-cell__day--today':''}`}>{cell.day}</span>
-                {shown.map(ev=>(
-                  <div key={ev.id} className={`cal-event${draggingEventId===ev.id?' cal-event--dragging':''}`}
-                    draggable onDragStart={e=>{e.stopPropagation();setDraggingEventId(ev.id);e.dataTransfer.setData('application/json',JSON.stringify({type:'cal-event',id:ev.id}));e.dataTransfer.effectAllowed='move';}}
-                    onDragEnd={()=>setDraggingEventId(null)} onClick={e=>openEditForm(ev.id,e)} title={ev.title}>
-                    {!ev.allDay&&ev.time&&<span className="cal-event__time">{formatTime(ev.time)}</span>}
-                    {ev.location&&<span className="cal-event__loc">📍</span>}
-                    <span className="cal-event__title">{ev.title}</span>
-                    <button className="cal-event__delete" onClick={e=>deleteEvent(ev.id,e)}>×</button>
-                  </div>
-                ))}
-                {extra>0&&<div className="cal-event__more">+{extra} more</div>}
+                <div className="cal-cell__events">
+                  {cellEvts.map(ev=>(
+                    <div key={ev.id} className={`cal-event${draggingEventId===ev.id?' cal-event--dragging':''}`}
+                      draggable onDragStart={e=>{e.stopPropagation();setDraggingEventId(ev.id);e.dataTransfer.setData('application/json',JSON.stringify({type:'cal-event',id:ev.id}));e.dataTransfer.effectAllowed='move';}}
+                      onDragEnd={()=>setDraggingEventId(null)} onClick={e=>openEditForm(ev.id,e)} title={ev.title}>
+                      {!ev.allDay&&ev.time&&<span className="cal-event__time">{formatTime(ev.time)}</span>}
+                      {ev.location&&<span className="cal-event__loc">📍</span>}
+                      <span className="cal-event__title">{ev.title}</span>
+                      <button className="cal-event__delete" onClick={e=>deleteEvent(ev.id,e)}>×</button>
+                    </div>
+                  ))}
+                </div>
               </div>
             );
           })}
@@ -471,6 +453,7 @@ function CalendarPanel({ doc, slug, setCursor }) {
             </div>
           ))}
         </div>
+      </div>
       </div>
       {form&&(
         <div className="cal-form-backdrop" onClick={()=>setForm(null)}>
@@ -500,8 +483,8 @@ function CalendarPanel({ doc, slug, setCursor }) {
             <input type="text" className="cal-form__input" placeholder="Location (optional)"
               value={form.location} onChange={e=>setForm(f=>({...f,location:e.target.value}))}/>
             <div className="cal-form__actions">
-              <button className="cal-form__btn cal-form__btn--add" onClick={saveEvent}>{form.mode==='edit'?'SAVE':'ADD'}</button>
-              {form.mode==='edit'&&<button className="cal-form__btn cal-form__btn--delete" onClick={()=>deleteEvent(form.id)}>DEL</button>}
+              <button className="cal-form__btn cal-form__btn--add" onClick={saveEvent}>{form.mode==='edit'?'UPDATE':'ADD'}</button>
+              {form.mode==='edit'&&<button className="cal-form__btn cal-form__btn--delete" onClick={()=>deleteEvent(form.id)}>DELETE</button>}
               <button className="cal-form__btn cal-form__btn--cancel" onClick={()=>setForm(null)}>CANCEL</button>
             </div>
           </div>
@@ -520,6 +503,7 @@ function escHtml(s) {
 }
 
 function injectDragHandles(el) {
+  // Checklist items: drag handle (left) + checkbox
   el.querySelectorAll('.ck-item').forEach(li => {
     if (!li.querySelector('.ck-drag')) {
       const handle = document.createElement('span');
@@ -536,6 +520,18 @@ function injectDragHandles(el) {
       box.contentEditable = 'false';
       const handle = li.querySelector('.ck-drag');
       li.insertBefore(box, handle ? handle.nextSibling : li.firstChild);
+    }
+  });
+  // Bullet and numbered list items: drag handle at end (right side)
+  el.querySelectorAll('ul:not(.ck) > li, ol > li').forEach(li => {
+    if (!li.querySelector('.ck-drag')) {
+      const handle = document.createElement('span');
+      handle.className = 'ck-drag';
+      handle.contentEditable = 'false';
+      handle.setAttribute('aria-hidden', 'true');
+      handle.draggable = true;
+      handle.textContent = '⠿';
+      li.appendChild(handle);
     }
   });
 }
@@ -699,66 +695,78 @@ function getDomTextRepr(root) {
   return result;
 }
 
-/* ── Format toolbar (two rows) ── */
+/* ── Format toolbar ── */
 
-function FormatToolbar({
-  activeFormats, activeStyle,
-  onFormat, onStyle, onList,
-  onUndo, onRedo, canUndo, canRedo,
-  onExport,
-}) {
-  const savedSelRef = useRef(null);
+function FormatToolbar({ activeFormats, activeStyle, activeList, onFormat, onStyle, onList }) {
+  const [aaOpen,   setAaOpen]   = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const aaRef   = useRef(null);
+  const listRef = useRef(null);
 
-  function saveSelBeforeStylePick() {
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) savedSelRef.current = sel.getRangeAt(0).cloneRange();
-  }
+  useEffect(() => {
+    if (!aaOpen && !listOpen) return;
+    const close = e => {
+      if (aaOpen   && !aaRef.current?.contains(e.target))   setAaOpen(false);
+      if (listOpen && !listRef.current?.contains(e.target)) setListOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [aaOpen, listOpen]);
 
-  function handleStyleChange(e) {
-    const tag = e.target.value;
-    if (savedSelRef.current) {
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(savedSelRef.current);
-      savedSelRef.current = null;
-    }
-    onStyle(tag);
-  }
-
-  const STYLE_LABELS = { p:'Body', h1:'Title', h2:'Subhead', h6:'Small' };
+  const listBtnLabel = activeList === 'bullet' ? '• ▾' : activeList === 'numbered' ? '1. ▾' : activeList === 'checklist' ? '☑ ▾' : '≡ ▾';
 
   return (
     <div className="format-toolbar">
-      {/* Row 1: styles + inline formats + undo/redo */}
-      <div className="format-toolbar__row">
-        <select className="style-select" value={activeStyle}
-          onMouseDown={saveSelBeforeStylePick} onChange={handleStyleChange}>
-          <option value="p">Body</option>
-          <option value="h1">Title</option>
-          <option value="h2">Subhead</option>
-          <option value="h6">Small</option>
-        </select>
-        <span className="fmt-sep"/>
-        <button className={`format-btn${activeFormats.bold?' format-btn--active':''}`}
-          onMouseDown={e=>{e.preventDefault();onFormat('bold');}} title="Bold (⌘B)">B</button>
-        <button className={`format-btn format-btn--i${activeFormats.italic?' format-btn--active':''}`}
-          onMouseDown={e=>{e.preventDefault();onFormat('italic');}} title="Italic (⌘I)">I</button>
-        <button className={`format-btn format-btn--s${activeFormats.strike?' format-btn--active':''}`}
-          onMouseDown={e=>{e.preventDefault();onFormat('strike');}} title="Strike (⌘⇧X)">S</button>
-        <button className={`format-btn format-btn--u${activeFormats.underline?' format-btn--active':''}`}
-          onMouseDown={e=>{e.preventDefault();onFormat('underline');}} title="Underline (⌘U)">U</button>
-        <span className="fmt-sep"/>
-        <button className="format-btn" onMouseDown={e=>{e.preventDefault();onUndo();}} disabled={!canUndo} title="Undo (⌘Z)">↩</button>
-        <button className="format-btn" onMouseDown={e=>{e.preventDefault();onRedo();}} disabled={!canRedo} title="Redo (⌘⇧Z)">↪</button>
+      <button className={`tb-btn${activeFormats.bold      ? ' tb-btn--on' : ''}`}
+        onMouseDown={e => { e.preventDefault(); onFormat('bold'); }}
+        style={{ fontWeight: 900 }}>B</button>
+      <button className={`tb-btn${activeFormats.italic    ? ' tb-btn--on' : ''}`}
+        onMouseDown={e => { e.preventDefault(); onFormat('italic'); }}
+        style={{ fontStyle: 'italic' }}>I</button>
+      <button className={`tb-btn${activeFormats.underline ? ' tb-btn--on' : ''}`}
+        onMouseDown={e => { e.preventDefault(); onFormat('underline'); }}
+        style={{ textDecoration: 'underline' }}>U</button>
+      <button className={`tb-btn${activeFormats.strike    ? ' tb-btn--on' : ''}`}
+        onMouseDown={e => { e.preventDefault(); onFormat('strike'); }}
+        style={{ textDecoration: 'line-through' }}>S</button>
+      <div className="tb-sep" />
+      <div className="tb-dd" ref={aaRef}>
+        <button
+          className={`tb-btn${aaOpen || (activeStyle && activeStyle !== 'p') ? ' tb-btn--on' : ''}`}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => { setAaOpen(o => !o); setListOpen(false); }}>Aa ▾</button>
+        {aaOpen && (
+          <div className="tb-popover">
+            <button className={`tb-pop-item${activeStyle === 'h1'  ? ' tb-pop-item--active' : ''}`} style={{ font: '900 20px/1.3 Nunito,sans-serif' }}
+              onMouseDown={e => { e.preventDefault(); onStyle('h1');  setAaOpen(false); }}>Title</button>
+            <button className={`tb-pop-item${activeStyle === 'h2'  ? ' tb-pop-item--active' : ''}`} style={{ font: '800 16px/1.3 Nunito,sans-serif' }}
+              onMouseDown={e => { e.preventDefault(); onStyle('h2');  setAaOpen(false); }}>Heading</button>
+            <button className={`tb-pop-item${activeStyle === 'h3'  ? ' tb-pop-item--active' : ''}`} style={{ font: '700 14px/1.3 Nunito,sans-serif' }}
+              onMouseDown={e => { e.preventDefault(); onStyle('h3');  setAaOpen(false); }}>Subheading</button>
+            <button className={`tb-pop-item${activeStyle === 'p'   ? ' tb-pop-item--active' : ''}`} style={{ font: '400 13px/1.3 Nunito,sans-serif' }}
+              onMouseDown={e => { e.preventDefault(); onStyle('p');   setAaOpen(false); }}>Body</button>
+            <button className={`tb-pop-item${activeStyle === 'pre' ? ' tb-pop-item--active' : ''}`} style={{ font: '400 13px/1.3 monospace' }}
+              onMouseDown={e => { e.preventDefault(); onStyle('pre'); setAaOpen(false); }}>Monospace</button>
+          </div>
+        )}
       </div>
-      {/* Row 2: list types + export */}
-      <div className="format-toolbar__row format-toolbar__row--2">
-        <button className="format-btn format-btn--wide" onMouseDown={e=>{e.preventDefault();onList('bullet');}} title="Bullet list">• LIST</button>
-        <button className="format-btn format-btn--wide" onMouseDown={e=>{e.preventDefault();onList('numbered');}} title="Numbered list"># LIST</button>
-        <button className="format-btn format-btn--wide" onMouseDown={e=>{e.preventDefault();onList('checkbox');}} title="Checkbox list (⌘⇧L)">☑ LIST</button>
-        <span className="fmt-sep fmt-sep--push"/>
-        <button className="format-btn format-btn--wide" onClick={()=>onExport('txt')} title="Export as .txt">.TXT</button>
-        <button className="format-btn format-btn--wide" onClick={()=>onExport('md')} title="Export as .md">.MD</button>
+      <div className="tb-dd" ref={listRef}>
+        <button
+          className={`tb-btn${listOpen || activeList ? ' tb-btn--on' : ''}`}
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => { setListOpen(o => !o); setAaOpen(false); }}>{listBtnLabel}</button>
+        {listOpen && (
+          <div className="tb-popover">
+            <button className={`tb-pop-item${activeList === 'bullet'    ? ' tb-pop-item--active' : ''}`}
+              onMouseDown={e => { e.preventDefault(); onList('bullet');    setListOpen(false); }}>• Bullet list</button>
+            <button className={`tb-pop-item${activeList === 'numbered'  ? ' tb-pop-item--active' : ''}`}
+              onMouseDown={e => { e.preventDefault(); onList('numbered');  setListOpen(false); }}>1. Numbered list</button>
+            <button className={`tb-pop-item${activeList === 'checklist' ? ' tb-pop-item--active' : ''}`}
+              onMouseDown={e => { e.preventDefault(); onList('checklist'); setListOpen(false); }}>
+              <span className="tb-check-preview" /> Checklist
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -766,7 +774,7 @@ function FormatToolbar({
 
 /* ── Unified editor ── */
 
-function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
+function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exportRef }) {
   const editorRef       = useRef(null);
   const isApplying      = useRef(false);
   const undoMgrRef      = useRef(null);
@@ -779,6 +787,8 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
   const [canUndo,       setCanUndo]       = useState(false);
   const [canRedo,       setCanRedo]       = useState(false);
   const [domVersion,    setDomVersion]    = useState(0);
+
+  const [activeList,   setActiveList]  = useState(null);
 
   const yXml = doc.getText(`tab-xml-${tabId}`);
 
@@ -870,8 +880,8 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       isApplying.current = false;
       if (hasFocus && savedOffset !== null) {
         // Chrome drops the selection (but not focus) when innerHTML is replaced.
-        // Re-assert focus before restoring so the cursor is actually visible.
-        el.focus({ preventScroll: true });
+        // Restore the range directly — calling el.focus() here would reset the
+        // blink timer and cause a visible cursor flash on every remote keystroke.
         restoreCaretPos(el, savedOffset);
       }
       updateStats();
@@ -949,7 +959,19 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       strike:    document.queryCommandState('strikethrough'),
     });
     const raw = document.queryCommandValue('formatBlock').toLowerCase();
-    setActiveStyle(['h1','h2','h6'].includes(raw) ? raw : 'p');
+    setActiveStyle(['h1','h2','h3','pre'].includes(raw) ? raw : 'p');
+
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const node = sel.getRangeAt(0).startContainer;
+      const el = node.nodeType === 3 ? node.parentElement : node;
+      if (el?.closest?.('.ck-item')) setActiveList('checklist');
+      else if (el?.closest?.('ol'))  setActiveList('numbered');
+      else if (el?.closest?.('ul'))  setActiveList('bullet');
+      else                           setActiveList(null);
+    } else {
+      setActiveList(null);
+    }
   }
 
   /* ── Formatting actions ── */
@@ -971,23 +993,132 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
     updateActiveFormats();
   }
 
+  function exitCkItem(li) {
+    const clone = li.cloneNode(true);
+    clone.querySelectorAll('.ck-drag,.ck-box').forEach(n => n.remove());
+    const p = document.createElement('p');
+    p.innerHTML = clone.innerHTML || '<br>';
+    const list = li.parentElement;
+    list.after(p);
+    li.remove();
+    if (!list.querySelector('li')) list.remove();
+    const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  }
+
+  // When a non-collapsed selection spans any list content, first normalize everything
+  // back to plain paragraphs. Returns true if normalization happened (caller should
+  // return early so the user clicks a second time to apply the target list type).
+  function normalizeSelectedListsIfNeeded() {
+    const editor = editorRef.current;
+    const sel = window.getSelection();
+    if (!editor || !sel || !sel.rangeCount || sel.isCollapsed) return false;
+    const range = sel.getRangeAt(0);
+    const affectedLis = [...editor.querySelectorAll('li')].filter(li => range.intersectsNode(li));
+    if (affectedLis.length === 0) return false;
+
+    affectedLis.forEach(li => {
+      const clone = li.cloneNode(true);
+      clone.querySelectorAll('.ck-drag,.ck-box').forEach(n => n.remove());
+      const p = document.createElement('p');
+      p.innerHTML = clone.innerHTML || '<br>';
+      li.replaceWith(p);
+    });
+    editor.querySelectorAll('ul,ol').forEach(list => {
+      if (!list.querySelector('li')) list.remove();
+    });
+    syncToYjs(); updateActiveFormats();
+    return true;
+  }
+
   function insertBulletList() {
-    editorRef.current?.focus();
+    if (normalizeSelectedListsIfNeeded()) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.getRangeAt(0).startContainer;
+    const el = node.nodeType === 3 ? node.parentElement : node;
+    const ckLi = el?.closest?.('.ck-item');
+    if (ckLi) exitCkItem(ckLi);
     document.execCommand('insertUnorderedList', false, null);
-    syncToYjs();
+    syncToYjs(); updateActiveFormats();
   }
 
   function insertNumberedList() {
-    editorRef.current?.focus();
+    if (normalizeSelectedListsIfNeeded()) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.getRangeAt(0).startContainer;
+    const el = node.nodeType === 3 ? node.parentElement : node;
+    const ckLi = el?.closest?.('.ck-item');
+    if (ckLi) exitCkItem(ckLi);
     document.execCommand('insertOrderedList', false, null);
-    syncToYjs();
+    syncToYjs(); updateActiveFormats();
   }
 
   function insertCheckboxList() {
-    editorRef.current?.focus();
-    document.execCommand('insertHTML', false,
-      '<ul class="ck"><li class="ck-item" data-checked="false"><br></li></ul>');
-    syncToYjs();
+    if (normalizeSelectedListsIfNeeded()) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const node = sel.getRangeAt(0).startContainer;
+    const el = node.nodeType === 3 ? node.parentElement : node;
+
+    // Toggle off if already a checklist item
+    const ckLi = el?.closest?.('.ck-item');
+    if (ckLi) { exitCkItem(ckLi); syncToYjs(); updateActiveFormats(); return; }
+
+    // If in a plain ul/ol, toggle it off first so the next execCommand creates fresh
+    if (el?.closest?.('ul:not(.ck)')) document.execCommand('insertUnorderedList', false, null);
+    else if (el?.closest?.('ol'))     document.execCommand('insertOrderedList',   false, null);
+
+    // Use execCommand to create <ul><li> — preserves text, handles bare nodes & selections
+    document.execCommand('insertUnorderedList', false, null);
+
+    // Post-process: stamp the created <ul><li> with ck class names
+    // and capture a reference to the active <li> so we can restore cursor after sync
+    let targetLi = null;
+    const sel2 = window.getSelection();
+    if (sel2 && sel2.rangeCount) {
+      const n2 = sel2.getRangeAt(0).startContainer;
+      const e2 = n2.nodeType === 3 ? n2.parentElement : n2;
+      const ul = e2?.closest?.('ul');
+      if (ul && !ul.classList.contains('ck')) {
+        ul.classList.add('ck');
+        ul.querySelectorAll('li').forEach(item => {
+          item.className = 'ck-item';
+          item.dataset.checked = 'false';
+        });
+        targetLi = e2?.closest?.('li') || ul.lastElementChild;
+      }
+    }
+
+    syncToYjs(); updateActiveFormats();
+
+    // syncToYjs calls injectDragHandles which prepends .ck-drag/.ck-box spans,
+    // shifting the cursor to the start. Explicitly restore it to end of text content.
+    if (targetLi) {
+      editorRef.current?.focus();
+      // Walk backward past any trailing injected spans to find the last real content node
+      let lastContent = null;
+      for (let i = targetLi.childNodes.length - 1; i >= 0; i--) {
+        const n = targetLi.childNodes[i];
+        if (!(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box')))) {
+          lastContent = n; break;
+        }
+      }
+      const r = document.createRange();
+      if (lastContent?.nodeType === 3) {
+        r.setStart(lastContent, lastContent.textContent.length);
+      } else if (lastContent?.nodeName === 'BR') {
+        r.setStartBefore(lastContent);
+      } else if (lastContent) {
+        r.setStartAfter(lastContent);
+      } else {
+        r.selectNodeContents(targetLi); r.collapse(false);
+      }
+      r.collapse(true);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(r);
+    }
   }
 
   /* ── Undo / Redo ── */
@@ -1063,6 +1194,9 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
     URL.revokeObjectURL(a.href);
   }
 
+  // Expose latest handleExport to parent via ref (stays fresh with closure over editorRef)
+  useEffect(() => { if (exportRef) exportRef.current = handleExport; });
+
   /* ── Event handlers ── */
 
   const handleInput = useCallback(() => {
@@ -1096,51 +1230,82 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
     if (mod && !e.shiftKey && e.key==='z') { e.preventDefault(); undo(); return; }
     if (mod && e.shiftKey  && e.key==='z') { e.preventDefault(); redo(); return; }
 
-    // Checkbox Enter behavior
     if (e.key==='Enter' && !e.shiftKey) {
       const sel = window.getSelection();
       if (!sel||!sel.rangeCount) return;
       const node = sel.getRangeAt(0).startContainer;
-      const li = node.nodeType===1 ? node.closest?.('.ck-item') : node.parentElement?.closest('.ck-item');
-      if (!li) {
-        // Browser handles Enter for regular content; re-assert focus after it settles
-        // so the caret stays visible in the new line.
-        requestAnimationFrame(() => editorRef.current?.focus());
+      const el = node.nodeType === 1 ? node : node.parentElement;
+
+      // .ck-item: handle enter ourselves (create next item or exit)
+      const ckLi = el?.closest?.('.ck-item');
+      if (ckLi) {
+        e.preventDefault();
+        const liText = [...ckLi.childNodes]
+          .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
+          .map(n => n.textContent).join('').trim();
+        if (!liText) {
+          const p = document.createElement('p'); p.innerHTML = '<br>';
+          const list = ckLi.parentElement;
+          list.after(p);
+          ckLi.remove();
+          if (!list.children.length) list.remove();
+          syncToYjs();
+          editorRef.current?.focus();
+          const r = document.createRange(); r.setStart(p,0); r.collapse(true);
+          window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
+        } else {
+          const newLi = document.createElement('li');
+          newLi.className = 'ck-item';
+          newLi.dataset.checked = 'false';
+          newLi.innerHTML = '<br>';
+          ckLi.after(newLi);
+          syncToYjs();
+          editorRef.current?.focus();
+          const br = newLi.querySelector('br');
+          const r = document.createRange();
+          if (br) { r.setStartBefore(br); } else { r.selectNodeContents(newLi); r.collapse(false); }
+          r.collapse(true);
+          window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
+        }
         return;
       }
-      e.preventDefault();
 
-      // Exclude injected spans from empty-item check
-      const liText = [...li.childNodes]
-        .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
-        .map(n => n.textContent).join('').trim();
-
-      if (!liText) {
-        // Empty item → exit list
-        const p = document.createElement('p'); p.innerHTML = '<br>';
-        const list = li.parentElement;
-        list.after(p);
-        li.remove();
-        if (!list.children.length) list.remove();
-        syncToYjs();
-        editorRef.current?.focus();
-        const r = document.createRange(); r.setStart(p,0); r.collapse(true);
-        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-      } else {
-        // Create next item — set cursor AFTER syncToYjs injects spans
-        const newLi = document.createElement('li');
-        newLi.className = 'ck-item';
-        newLi.dataset.checked = 'false';
-        newLi.innerHTML = '<br>';
-        li.after(newLi);
-        syncToYjs(); // injects .ck-drag and .ck-box as first children
-        editorRef.current?.focus();
-        const br = newLi.querySelector('br');
-        const r = document.createRange();
-        if (br) { r.setStartBefore(br); } else { r.selectNodeContents(newLi); r.collapse(false); }
-        r.collapse(true);
-        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      // ul/ol li: empty item → exit list to paragraph
+      const ulLi = el?.closest?.('li');
+      if (ulLi) {
+        if (!ulLi.textContent.trim()) {
+          e.preventDefault();
+          const p = document.createElement('p'); p.innerHTML = '<br>';
+          const list = ulLi.parentElement;
+          list.after(p);
+          ulLi.remove();
+          if (!list.querySelector('li')) list.remove();
+          syncToYjs();
+          editorRef.current?.focus();
+          const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
+          window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
+          return;
+        }
+        // Non-empty: browser creates next <li>, sync afterward
+        requestAnimationFrame(() => { syncToYjs(); updateActiveFormats(); editorRef.current?.focus(); });
+        return;
       }
+
+      // Heading: browser creates another heading; convert it to body paragraph
+      if (el?.closest?.('h1,h2,h3')) {
+        requestAnimationFrame(() => {
+          const s2 = window.getSelection();
+          if (!s2 || !s2.rangeCount) return;
+          const n2 = s2.getRangeAt(0).startContainer;
+          const e2 = n2.nodeType === 1 ? n2 : n2.parentElement;
+          if (e2?.closest?.('h1,h2,h3')) document.execCommand('formatBlock', false, 'p');
+          syncToYjs(); updateActiveFormats();
+        });
+        return;
+      }
+
+      // Regular block: browser handles, just keep focus
+      requestAnimationFrame(() => editorRef.current?.focus());
     }
   }
 
@@ -1159,7 +1324,7 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
   function handleDragStart(e) {
     const handle = e.target instanceof Element ? e.target.closest('.ck-drag') : null;
     if (!handle) return;
-    const li = handle.closest('.ck-item');
+    const li = handle.closest('li');
     if (!li) return;
     dragStateRef.current = { li };
     li.classList.add('ck-item--dragging');
@@ -1169,8 +1334,23 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
       .map(n => n.textContent).join('').trim();
     e.dataTransfer.setData('text/plain', 'ck-reorder');
-    e.dataTransfer.setData('application/x-ck-item', text);          // marker for calendar dragenter detection
+    e.dataTransfer.setData('application/x-ck-item', text);
     e.dataTransfer.setData('application/json', JSON.stringify({ type: 'ck-item', text }));
+    // Custom drag ghost: pill showing the item text
+    const ghost = document.createElement('div');
+    ghost.textContent = text || '•';
+    ghost.style.cssText = [
+      'position:fixed','top:-9999px','left:-9999px',
+      'background:#F9A8D4','color:#1A0A0E',
+      'font-family:Nunito,sans-serif','font-size:12px','font-weight:700',
+      'padding:4px 10px','border-radius:3px','border:2px solid #1A0A0E',
+      'box-shadow:2px 2px 0 #F472B6','white-space:nowrap',
+      'max-width:200px','overflow:hidden','text-overflow:ellipsis',
+      'pointer-events:none',
+    ].join(';');
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 14, 14);
+    requestAnimationFrame(() => document.body.removeChild(ghost));
   }
 
   function handleDragOver(e) {
@@ -1179,10 +1359,13 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
     e.dataTransfer.dropEffect = 'move';
     const el = editorRef.current;
     if (!el) return;
-    const allLis = [...el.querySelectorAll('.ck-item')];
-    allLis.forEach(li => li.classList.remove('ck-item--drop-above', 'ck-item--drop-below'));
+    // Only show drop targets among siblings in the same parent list
+    const parent = dragStateRef.current.li.parentElement;
+    const siblings = parent ? [...parent.querySelectorAll(':scope > li')] : [];
+    el.querySelectorAll('.ck-item--drop-above, .ck-item--drop-below')
+      .forEach(li => li.classList.remove('ck-item--drop-above', 'ck-item--drop-below'));
     let found = false;
-    for (const li of allLis) {
+    for (const li of siblings) {
       if (li === dragStateRef.current.li) continue;
       const rect = li.getBoundingClientRect();
       if (e.clientY < rect.top + rect.height / 2) {
@@ -1192,7 +1375,7 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       }
     }
     if (!found) {
-      const last = [...allLis].reverse().find(li => li !== dragStateRef.current.li);
+      const last = [...siblings].reverse().find(li => li !== dragStateRef.current.li);
       if (last) last.classList.add('ck-item--drop-below');
     }
   }
@@ -1233,14 +1416,14 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       dragStateRef.current = null;
       state.li.classList.remove('ck-item--dragging');
       if (el && el.contains(state.li)) {
-        const allLis = [...el.querySelectorAll('.ck-item')];
+        const parent = state.li.parentElement;
+        const allLis = parent ? [...parent.querySelectorAll(':scope > li')] : [];
         let insertBefore = null;
         for (const li of allLis) {
           if (li === state.li) continue;
           const rect = li.getBoundingClientRect();
           if (e.clientY < rect.top + rect.height / 2) { insertBefore = li; break; }
         }
-        const parent = state.li.parentElement;
         if (parent) {
           let changed = false;
           if (insertBefore) {
@@ -1269,16 +1452,16 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
       <FormatToolbar
         activeFormats={activeFormats}
         activeStyle={activeStyle}
+        activeList={activeList}
         onFormat={toggleFormat}
         onStyle={applyStyle}
-        onList={type => { if(type==='bullet')insertBulletList(); else if(type==='numbered')insertNumberedList(); else insertCheckboxList(); }}
-        onUndo={undo}
-        onRedo={redo}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onExport={handleExport}
+        onList={type => {
+          if (type === 'bullet') insertBulletList();
+          else if (type === 'numbered') insertNumberedList();
+          else insertCheckboxList();
+        }}
       />
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', position: 'relative', flex: 1, minHeight: 0, flexDirection: 'column' }}>
         <div
           ref={editorRef}
           className="unified-editor"
@@ -1307,13 +1490,40 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor }) {
 
 /* ── Notes panel ── */
 
-function NotesPanel({ doc, synced, editorCursors, setEditorCursor }) {
+function NotesPanel({ doc, synced, editorCursors, setEditorCursor, exportRef }) {
   const [tabs,         setTabs]         = useState([]);
   const [activeTabId,  setActiveTabId]  = useState(null);
   const [renamingId,   setRenamingId]   = useState(null);
   const [renameText,   setRenameText]   = useState('');
   const [dropTarget,   setDropTarget]   = useState(null);
-  const dragTabRef = useRef(null);
+  const [collapsed,    setCollapsed]    = useState(false);
+  const [panelWidth,   setPanelWidth]   = useState(300);
+  const lastWidthRef = useRef(300);
+  const panelRef     = useRef(null);
+  const dragTabRef   = useRef(null);
+
+  function startResize(e) {
+    e.preventDefault();
+    if (collapsed) return;
+    const startX = e.clientX;
+    const startW = panelRef.current?.offsetWidth ?? panelWidth;
+    const onMove = ev => {
+      const w = Math.max(0, Math.min(560, startW + (startX - ev.clientX)));
+      if (w < 120) {
+        setCollapsed(true);
+      } else {
+        setCollapsed(false);
+        setPanelWidth(w);
+        lastWidthRef.current = w;
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
 
   const yTabs = doc ? doc.getArray('tabs') : null;
 
@@ -1388,11 +1598,14 @@ function NotesPanel({ doc, synced, editorCursors, setEditorCursor }) {
   }
 
   return (
-    <>
-      <div className="panel__titlebar">Notes</div>
-
+    <div
+      ref={panelRef}
+      className={`notes-panel${collapsed ? ' notes-panel--collapsed' : ''}`}
+      style={collapsed ? undefined : { width: panelWidth }}
+    >
+      <div className="notes-resize-handle" onMouseDown={startResize} />
       <div className="notes-tabs">
-        {tabs.map(tab => (
+        {!collapsed && tabs.map(tab => (
           <div key={tab.id}
             className={['notes-tab', activeTabId===tab.id?'notes-tab--active':'',
               dropTarget?.id===tab.id&&dropTarget.side==='left'?'notes-tab--drop-left':'',
@@ -1421,20 +1634,30 @@ function NotesPanel({ doc, synced, editorCursors, setEditorCursor }) {
             )}
           </div>
         ))}
-        <button className="notes-tabs__add" onClick={addTab} disabled={tabs.length>=5}
-          title={tabs.length>=5?'Max 5 tabs':'Add tab'}>+</button>
+        {!collapsed && (
+          <button className="notes-tabs__add" onClick={addTab} disabled={tabs.length>=5}
+            title={tabs.length>=5?'Max 5 tabs':'Add tab'}>+</button>
+        )}
+        <button className="notes-collapse-btn" onClick={() => {
+          if (collapsed) setPanelWidth(Math.max(220, lastWidthRef.current));
+          setCollapsed(o => !o);
+        }} title={collapsed ? 'Expand notes' : 'Collapse notes'}>
+          {collapsed ? '›' : '‹'}
+        </button>
       </div>
 
-      <div className="panel__body">
-        {!doc ? (
-          <div className="notes-connecting">Connecting...</div>
-        ) : !activeTab ? (
-          <div className="notes-connecting">Loading...</div>
-        ) : (
-          <UnifiedEditor doc={doc} tabId={activeTab.id} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor} />
-        )}
-      </div>
-    </>
+      {!collapsed && (
+        <div className="panel__body">
+          {!doc ? (
+            <div className="notes-connecting">Connecting...</div>
+          ) : !activeTab ? (
+            <div className="notes-connecting">Loading...</div>
+          ) : (
+            <UnifiedEditor key={activeTab.id} doc={doc} tabId={activeTab.id} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor} exportRef={exportRef} />
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1459,7 +1682,7 @@ function NameEditor({ displayName, setDisplayName }) {
 
 /* ── Room name editor (DB-authoritative, Yjs for real-time sync) ── */
 
-function RoomNameEditor({ doc, roomId, currentSlug, initialName }) {
+function RoomNameEditor({ doc, roomId, currentSlug, initialName, renameRef }) {
   const navigate = useNavigate();
   const [name,setName]       = useState(initialName);
   const [editing,setEditing] = useState(false);
@@ -1476,6 +1699,9 @@ function RoomNameEditor({ doc, roomId, currentSlug, initialName }) {
     sync();
     return () => yName.unobserve(sync);
   }, [yName]);
+
+  // Expose latest startEdit to parent via ref
+  useEffect(() => { if (renameRef) renameRef.current = () => { setDraft(name); setEditing(true); }; });
 
   // Navigate all connected clients when slug changes (handles both local and remote renames)
   useEffect(() => {
@@ -1521,23 +1747,26 @@ function RoomNameEditor({ doc, roomId, currentSlug, initialName }) {
   );
 }
 
-/* ── Share button ── */
+/* ── Delete modal ── */
 
-function ShareButton() {
-  const [copied,setCopied] = useState(false);
-  function copy() {
-    navigator.clipboard.writeText(window.location.href).then(()=>{
-      setCopied(true); setTimeout(()=>setCopied(false),2000);
-    });
-  }
+function LeaveModal({ onConfirm, onCancel }) {
   return (
-    <button className={`pathbar__share${copied?' pathbar__share--copied':''}`} onClick={copy}>
-      {copied?'COPIED!':'COPY LINK'}
-    </button>
+    <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal">
+        <div className="modal__titlebar">← LEAVE ROOM</div>
+        <div className="modal__body">
+          <p className="modal__warning">
+            You'll lose access to this room and all its notes unless you rejoin with the room link.
+          </p>
+          <div className="modal__actions">
+            <button className="modal__btn" onClick={onCancel}>Cancel</button>
+            <button className="modal__btn modal__btn--danger" onClick={onConfirm}>Leave Room</button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
-
-/* ── Room menu (leave / delete) ── */
 
 function DeleteModal({ roomName, onConfirm, onCancel }) {
   const [typed, setTyped] = useState('');
@@ -1575,8 +1804,9 @@ function DeleteModal({ roomName, onConfirm, onCancel }) {
   );
 }
 
-function RoomMenu({ onDelete }) {
-  const [open, setOpen] = useState(false);
+function RoomMenu({ onCopyLink, onExportIcs, onExportTxt, onRename, onLeave, onDelete }) {
+  const [open,   setOpen]   = useState(false);
+  const [copied, setCopied] = useState(false);
   const ref = useRef(null);
 
   useEffect(() => {
@@ -1586,17 +1816,35 @@ function RoomMenu({ onDelete }) {
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
+  function handleCopyLink() {
+    onCopyLink();
+    setCopied(true);
+    setTimeout(() => { setCopied(false); setOpen(false); }, 1500);
+  }
+
   return (
     <div className="room-menu" ref={ref}>
-      <button
-        className="room-menu__trigger"
-        onClick={() => setOpen(o => !o)}
-        title="Room settings"
-      >···</button>
+      <button className="room-menu__trigger" onClick={() => setOpen(o => !o)} title="Room options">···</button>
       {open && (
         <div className="room-menu__dropdown">
+          <button className="room-menu__item" onClick={handleCopyLink}>
+            {copied ? '✓ Copied!' : '⎘ Copy Link'}
+          </button>
+          <button className="room-menu__item" onClick={() => { setOpen(false); onExportIcs(); }}>
+            ↓ Export .ICS
+          </button>
+          <button className="room-menu__item" onClick={() => { setOpen(false); onExportTxt?.(); }}>
+            ↓ Export .TXT
+          </button>
+          <button className="room-menu__item" onClick={() => { setOpen(false); onRename(); }}>
+            ✎ Rename Room
+          </button>
+          <div className="room-menu__divider"/>
+          <button className="room-menu__item" onClick={() => { setOpen(false); onLeave(); }}>
+            ← Leave Room
+          </button>
           <button className="room-menu__item room-menu__item--danger" onClick={() => { setOpen(false); onDelete(); }}>
-            ✕ DELETE ROOM
+            ✕ Delete Room
           </button>
         </div>
       )}
@@ -1612,6 +1860,14 @@ function RoomContent({ roomId, currentSlug, initialName }) {
   const [online, setOnline] = useState(navigator.onLine);
   const calendarRef = useRef(null);
   const throttleRef = useRef(0);
+  const icsRef      = useRef(null);
+  const renameRef   = useRef(null);
+  const txtRef      = useRef(null);
+  const menuRef     = useRef(null);
+
+  const [menuOpen,    setMenuOpen]    = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput,   setNameInput]   = useState('');
 
   useEffect(() => {
     const on  = () => setOnline(true);
@@ -1650,9 +1906,13 @@ function RoomContent({ roomId, currentSlug, initialName }) {
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteRoomName,  setDeleteRoomName]  = useState('');
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
 
-  function handleLeave() {
-    navigate('/');
+  function handleLeave() { setLeaveConfirmOpen(true); }
+  function confirmLeave() { navigate('/'); }
+
+  function handleCopyLink() {
+    navigator.clipboard.writeText(window.location.href).catch(() => {});
   }
 
   function openDeleteModal() {
@@ -1667,41 +1927,104 @@ function RoomContent({ roomId, currentSlug, initialName }) {
     if (doc) { try { doc.getMap('__meta').set('deleted', true); } catch {} }
   }
 
+  // Menu close on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = e => {
+      if (!menuRef.current?.contains(e.target)) { setMenuOpen(false); setEditingName(false); }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
+
+  function saveName() {
+    const t = nameInput.trim();
+    if (t) setDisplayName(t);
+    setEditingName(false);
+    setMenuOpen(false);
+  }
+
+  const effective   = !online ? 'disconnected' : status;
+  const dotColor    = effective === 'connected' ? '#22c55e' : effective === 'connecting' ? '#f59e0b' : '#ef4444';
+  const statusLabel = effective === 'connected' ? 'Connected' : effective === 'connecting' ? 'Reconnecting...' : 'Offline';
+
   return (
     <div className="room-shell">
       <div className="room">
-        <div className="topbar">
-          <span className="topbar__logo">✦ PlannerPad</span>
-          <NameEditor displayName={displayName} setDisplayName={setDisplayName}/>
-          <ConnectionBadge status={status} online={online}/>
-          <UserList users={users}/>
-        </div>
-        <div className="pathbar">
-          <RoomNameEditor doc={doc} roomId={roomId} currentSlug={currentSlug} initialName={initialName || currentSlug}/>
-          <button className="pathbar__leave" onClick={handleLeave} title="Leave room">← LEAVE</button>
-          <ShareButton/>
-          <RoomMenu onDelete={openDeleteModal}/>
-        </div>
-        <OfflineBanner status={status}/>
-        <div className="panels">
-          <div className="panel">
-            <div className="panel__titlebar">Calendar</div>
-            <div
-              className="panel__body"
-              style={{ position: 'relative' }}
-              ref={calendarRef}
-              onMouseMove={handleCalendarMouseMove}
-              onMouseLeave={handleCalendarMouseLeave}
-            >
-              {doc ? <CalendarPanel doc={doc} slug={currentSlug} setCursor={setCursor}/> : <div className="notes-connecting">Connecting...</div>}
-              <CursorOverlay cursors={cursors}/>
+
+        {/* Header */}
+        <div className="header">
+          <div className="header__left">
+            <span className="header__logo">PlannerPad</span>
+            <div className="header__divider" />
+            <RoomNameEditor doc={doc} roomId={roomId} currentSlug={currentSlug} initialName={initialName || currentSlug} renameRef={renameRef}/>
+          </div>
+          <div className="header__right">
+            <UserList users={users}/>
+            <div className="hbtn" ref={menuRef}>
+              <button className="hbtn__trigger" onClick={() => setMenuOpen(o => !o)}>
+                <span className="hbtn__status">
+                  <span className="hbtn__dot" style={{ background: dotColor }} />
+                  <span className="hbtn__label">{statusLabel}</span>
+                </span>
+                <span className="hbtn__sep" />
+                <span className="hbtn__dots">···</span>
+              </button>
+              {menuOpen && (
+                <div className="hbtn__dropdown">
+                  {editingName ? (
+                    <div className="hbtn__name-edit">
+                      <div className="hbtn__name-label">CHANGE NAME</div>
+                      <input
+                        autoFocus
+                        className="hbtn__name-input"
+                        value={nameInput}
+                        onChange={e => setNameInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') setEditingName(false); }}
+                      />
+                      <div className="hbtn__name-actions">
+                        <button className="hbtn__name-save" onClick={saveName}>Save</button>
+                        <button className="hbtn__name-cancel" onClick={() => setEditingName(false)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button className="hbtn__item" onClick={() => { setNameInput(displayName); setEditingName(true); }}>Change name</button>
+                  )}
+                  <div className="hbtn__divider" />
+                  <button className="hbtn__item" onClick={() => { handleCopyLink(); setMenuOpen(false); }}>Copy room link</button>
+                  <button className="hbtn__item" onClick={() => { setMenuOpen(false); icsRef.current?.(); }}>Export .ICS</button>
+                  <button className="hbtn__item" onClick={() => { setMenuOpen(false); txtRef.current?.('txt'); }}>Export .TXT</button>
+                  <div className="hbtn__divider" />
+                  <button className="hbtn__item" onClick={() => { setMenuOpen(false); renameRef.current?.(); }}>Rename room</button>
+                  <button className="hbtn__item" onClick={() => { setMenuOpen(false); handleLeave(); }}>Leave room</button>
+                  <button className="hbtn__item hbtn__item--danger" onClick={() => { setMenuOpen(false); openDeleteModal(); }}>Delete room</button>
+                </div>
+              )}
             </div>
           </div>
-          <div className="panel">
-            <NotesPanel doc={doc} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor}/>
+        </div>
+
+        <OfflineBanner status={status}/>
+
+        {/* Panels */}
+        <div className="panels">
+          <div className="cal-panel"
+            ref={calendarRef}
+            onMouseMove={handleCalendarMouseMove}
+            onMouseLeave={handleCalendarMouseLeave}
+          >
+            {doc ? <CalendarPanel doc={doc} slug={currentSlug} setCursor={setCursor} exportRef={icsRef}/> : <div className="notes-connecting">Connecting...</div>}
+            <CursorOverlay cursors={cursors}/>
           </div>
+          <NotesPanel doc={doc} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor} exportRef={txtRef}/>
         </div>
       </div>
+      {leaveConfirmOpen && (
+        <LeaveModal
+          onConfirm={confirmLeave}
+          onCancel={() => setLeaveConfirmOpen(false)}
+        />
+      )}
       {deleteModalOpen && (
         <DeleteModal
           roomName={deleteRoomName}

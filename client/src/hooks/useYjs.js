@@ -2,16 +2,13 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 
-const PALETTE    = ['#C084FC', '#F0ABFC', '#6EE7B7', '#FCD34D', '#93C5FD', '#F9A8D4', '#86EFAC'];
+const PALETTE    = ['#7C3AED', '#1D4ED8', '#059669', '#B45309', '#BE185D', '#C2410C', '#0E7490'];
 const ADJECTIVES = ['Sleepy', 'Fuzzy', 'Calm', 'Brave', 'Happy', 'Gentle', 'Silly', 'Wise', 'Quick', 'Bold', 'Shy', 'Lazy'];
 const ANIMALS    = ['Panda', 'Rabbit', 'Otter', 'Fox', 'Deer', 'Bear', 'Wolf', 'Owl', 'Cat', 'Dog', 'Hawk', 'Seal'];
 
 function initDisplayName() {
-  // User-chosen names persist across tabs; auto-generated ones are tab-scoped
-  if (localStorage.getItem('plannerpad_username_manual') === 'true') {
-    const saved = localStorage.getItem('plannerpad_username');
-    if (saved) return saved;
-  }
+  // sessionStorage is tab-scoped, so each tab (= each "user" in testing) gets its own name.
+  // Page refreshes within the same tab restore the existing name via sessionStorage.
   const tab = sessionStorage.getItem('plannerpad_tabname');
   if (tab) return tab;
   const adj    = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
