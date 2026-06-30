@@ -222,9 +222,9 @@ function RemoteEditorCursors({ editorRef, cursors, domVersion }) {
         }}>
           <div style={{
             position: 'absolute', bottom: '100%', left: 0,
-            fontFamily: "'Press Start 2P', monospace", fontSize: '6px', lineHeight: 1.5,
+            fontFamily: "'Nunito', sans-serif", fontSize: '10px', fontWeight: 700, lineHeight: 1.4,
             background: p.color, color: hexBrightness(p.color) > 128 ? '#111' : '#fff',
-            padding: '1px 3px', whiteSpace: 'nowrap',
+            padding: '1px 4px', borderRadius: '2px 2px 2px 0', whiteSpace: 'nowrap',
           }}>
             {p.name}
           </div>

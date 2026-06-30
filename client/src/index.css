@@ -1890,13 +1890,13 @@ body {
   color: var(--text-1);
 }
 
-.unified-editor h6 {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--text-2);
+.unified-editor h3 {
   font-family: 'Nunito', sans-serif;
-  line-height: 23px;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 2;
   margin: 0;
+  color: var(--text-1);
 }
 
 .unified-editor p, .unified-editor div { margin: 0; }
