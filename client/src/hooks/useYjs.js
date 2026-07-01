@@ -30,6 +30,7 @@ export function useYjs(roomId) {
   const [editorCursors, setEditorCursors] = useState([]);
   const [doc, setDoc]                   = useState(null);
   const [synced, setSynced]             = useState(false);
+  const [wsProvider, setWsProvider]     = useState(null);
 
   useEffect(() => {
     if (!roomId) return;
@@ -38,6 +39,7 @@ export function useYjs(roomId) {
     const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const provider = new WebsocketProvider(`${wsProto}//${window.location.host}/yjs`, roomId, ydoc);
     providerRef.current = provider;
+    setWsProvider(provider);
 
     setDoc(ydoc);
     provider.once('sync', isSynced => { if (isSynced) setSynced(true); });
@@ -55,14 +57,14 @@ export function useYjs(roomId) {
       const others = entries.filter(([id, s]) => id !== myId && s.user);
       setCursors(
         others
-          .filter(([, s]) => s.cursor && s.cursor.x != null)
+          .filter(([, s]) => s.calCursor && s.calCursor.x != null)
           .map(([id, s]) => ({
             clientId: id,
             name: s.user.name,
             color: s.user.color,
-            x: s.cursor.x,
-            y: s.cursor.y,
-            updatedAt: s.cursor.t || Date.now(),
+            x: s.calCursor.x,
+            y: s.calCursor.y,
+            updatedAt: s.calCursor.t || Date.now(),
           }))
       );
       setEditorCursors(
@@ -84,6 +86,7 @@ export function useYjs(roomId) {
 
     return () => {
       providerRef.current = null;
+      setWsProvider(null);
       provider.off('status', onStatus);
       provider.awareness.off('change', onAwarenessChange);
       provider.destroy();
@@ -103,7 +106,7 @@ export function useYjs(roomId) {
   }, [displayName]);
 
   const setCursor = useCallback((x, y) => {
-    providerRef.current?.awareness.setLocalStateField('cursor', { x, y, t: Date.now() });
+    providerRef.current?.awareness.setLocalStateField('calCursor', { x, y, t: Date.now() });
   }, []);
 
   const setEditorCursor = useCallback((tabId, offset) => {
@@ -124,5 +127,6 @@ export function useYjs(roomId) {
     displayName, setDisplayName,
     myColor: myColor.current,
     setCursor, setEditorCursor,
+    wsProvider,
   };
 }

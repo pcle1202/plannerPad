@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as Y from 'yjs';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import Underline from '@tiptap/extension-underline';
+import Image from '@tiptap/extension-image';
 import ErrorScreen from './ErrorScreen.jsx';
 import { useYjs } from '../hooks/useYjs.js';
 
@@ -189,47 +197,6 @@ function CursorOverlay({ cursors }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-/* ── Remote editor cursors (inside the note) ── */
-
-function RemoteEditorCursors({ editorRef, cursors, domVersion }) {
-  const [rects, setRects] = useState([]);
-
-  // Recompute positions when cursor data changes OR when editor content changes (domVersion)
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el || !cursors.length) { setRects([]); return; }
-    const box = el.getBoundingClientRect();
-    const next = cursors.map(c => {
-      const r = getCaretRect(el, c.offset);
-      if (!r || !r.height) return null;
-      return { clientId: c.clientId, name: c.name, color: c.color,
-        x: Math.round(r.left - box.left), y: Math.round(r.top - box.top), h: Math.round(r.height) };
-    }).filter(Boolean);
-    setRects(next);
-  }, [cursors, domVersion]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (!rects.length) return null;
-  return (
-    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 5 }}>
-      {rects.map(p => (
-        <div key={p.clientId} style={{
-          position: 'absolute', left: p.x, top: p.y,
-          width: 2, height: p.h, background: p.color, pointerEvents: 'none',
-        }}>
-          <div style={{
-            position: 'absolute', bottom: '100%', left: 0,
-            fontFamily: "'Nunito', sans-serif", fontSize: '10px', fontWeight: 700, lineHeight: 1.4,
-            background: p.color, color: hexBrightness(p.color) > 128 ? '#111' : '#fff',
-            padding: '1px 4px', borderRadius: '2px 2px 2px 0', whiteSpace: 'nowrap',
-          }}>
-            {p.name}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
@@ -502,59 +469,6 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function injectDragHandles(el) {
-  // Checklist items: drag handle (left) + checkbox
-  el.querySelectorAll('.ck-item').forEach(li => {
-    if (!li.querySelector('.ck-drag')) {
-      const handle = document.createElement('span');
-      handle.className = 'ck-drag';
-      handle.contentEditable = 'false';
-      handle.setAttribute('aria-hidden', 'true');
-      handle.draggable = true;
-      handle.textContent = '⠿';
-      li.insertBefore(handle, li.firstChild);
-    }
-    if (!li.querySelector('.ck-box')) {
-      const box = document.createElement('span');
-      box.className = 'ck-box';
-      box.contentEditable = 'false';
-      const handle = li.querySelector('.ck-drag');
-      li.insertBefore(box, handle ? handle.nextSibling : li.firstChild);
-    }
-  });
-  // Bullet and numbered list items: drag handle at end (right side)
-  el.querySelectorAll('ul:not(.ck) > li, ol > li').forEach(li => {
-    if (!li.querySelector('.ck-drag')) {
-      const handle = document.createElement('span');
-      handle.className = 'ck-drag';
-      handle.contentEditable = 'false';
-      handle.setAttribute('aria-hidden', 'true');
-      handle.draggable = true;
-      handle.textContent = '⠿';
-      li.appendChild(handle);
-    }
-  });
-}
-
-function getCleanHtml(el) {
-  const clone = el.cloneNode(true);
-  clone.querySelectorAll('.ck-drag, .ck-box').forEach(n => n.remove());
-  // Normalize browser-generated presentational tags to semantic equivalents so
-  // yXml stores consistent HTML that matches the explicit CSS rules, and so
-  // remote users always receive <strong>/<em> which are explicitly styled.
-  clone.querySelectorAll('b').forEach(b => {
-    const s = document.createElement('strong');
-    while (b.firstChild) s.appendChild(b.firstChild);
-    b.replaceWith(s);
-  });
-  clone.querySelectorAll('i').forEach(i => {
-    const em = document.createElement('em');
-    while (i.firstChild) em.appendChild(i.firstChild);
-    i.replaceWith(em);
-  });
-  return clone.innerHTML;
-}
-
 // Migration: convert old Y.Text delta → HTML string
 function legacyDeltaToHtml(delta) {
   return delta.map(op => {
@@ -567,132 +481,6 @@ function legacyDeltaToHtml(delta) {
     if (a.bold)      t = `<strong>${t}</strong>`;
     return t;
   }).join('');
-}
-
-function htmlToMarkdown(html) {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = html;
-  function walk(n) {
-    if (n.nodeType===3) return n.textContent;
-    if (n.nodeType!==1) return '';
-    const tag = n.tagName.toLowerCase();
-    const kids = [...n.childNodes].map(walk).join('');
-    switch (tag) {
-      case 'h1': return `# ${kids}\n\n`;
-      case 'h2': return `## ${kids}\n\n`;
-      case 'h3': return `### ${kids}\n\n`;
-      case 'p':  return kids ? kids+'\n\n' : '';
-      case 'br': return '\n';
-      case 'strong': case 'b': return `**${kids}**`;
-      case 'em':     case 'i': return `*${kids}*`;
-      case 'u':    return `__${kids}__`;
-      case 's':    return `~~${kids}~~`;
-      case 'ul': {
-        return [...n.querySelectorAll(':scope > li')].map(li => {
-          const t = [...li.childNodes].map(walk).join('');
-          return li.classList.contains('ck-item')
-            ? `- [${li.dataset.checked==='true'?'x':' '}] ${t}\n`
-            : `- ${t}\n`;
-        }).join('')+'\n';
-      }
-      case 'ol': return [...n.querySelectorAll(':scope > li')].map((li,i)=>`${i+1}. ${[...li.childNodes].map(walk).join('')}\n`).join('')+'\n';
-      case 'li':  return kids;
-      case 'img': return `![image]()\n`;
-      case 'div': return kids+'\n';
-      default:    return kids;
-    }
-  }
-  return [...tmp.childNodes].map(walk).join('').replace(/\n{3,}/g,'\n\n').trim();
-}
-
-/* ── Cursor helpers ── */
-
-const SKIP_NON_EDITABLE = { acceptNode: n => n.contentEditable === 'false' ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT };
-
-function saveCaretPos(root) {
-  const sel = window.getSelection();
-  if (!sel||!sel.rangeCount||!root.contains(sel.getRangeAt(0).startContainer)) return null;
-  const range = sel.getRangeAt(0);
-  let chars = 0;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT, SKIP_NON_EDITABLE);
-  let node;
-  while ((node=walker.nextNode())) {
-    if (node.nodeType===1) {
-      if (node.nodeName==='BR') { if(node===range.startContainer) return chars; chars++; }
-      else if (node===range.startContainer) return chars; // cursor at start of a block element (e.g. new paragraph after Enter)
-      continue;
-    }
-    if (node===range.startContainer) return chars+range.startOffset;
-    chars += node.length;
-  }
-  return chars;
-}
-
-function restoreCaretPos(root, target) {
-  if (target===null) return;
-  let chars = 0;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT|NodeFilter.SHOW_ELEMENT, SKIP_NON_EDITABLE);
-  let node;
-  while ((node=walker.nextNode())) {
-    if (node.nodeType===1) {
-      if (node.nodeName==='BR') {
-        if (chars===target) { const r=document.createRange(); r.setStartBefore(node); r.collapse(true); const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); return; }
-        chars++;
-      }
-      continue;
-    }
-    if (chars+node.length>=target) {
-      const r=document.createRange(); r.setStart(node,target-chars); r.collapse(true);
-      const s=window.getSelection(); s.removeAllRanges(); s.addRange(r); return;
-    }
-    chars += node.length;
-  }
-  const r=document.createRange(); r.selectNodeContents(root); r.collapse(false);
-  const s=window.getSelection(); s.removeAllRanges(); s.addRange(r);
-}
-
-// Convert character offset back to a viewport DOMRect (for remote cursor rendering)
-function getCaretRect(root, offset) {
-  let chars = 0;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, SKIP_NON_EDITABLE);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.nodeType === 1) {
-      if (node.nodeName === 'BR') {
-        if (chars === offset) {
-          const r = document.createRange(); r.setStartBefore(node); r.collapse(true);
-          return r.getBoundingClientRect();
-        }
-        chars++;
-      }
-      continue;
-    }
-    if (chars + node.length >= offset) {
-      const r = document.createRange(); r.setStart(node, offset - chars); r.collapse(true);
-      return r.getBoundingClientRect();
-    }
-    chars += node.length;
-  }
-  const r = document.createRange(); r.selectNodeContents(root); r.collapse(false);
-  return r.getBoundingClientRect();
-}
-
-// Returns the visible text content of `root` as a string where each text
-// character maps to one index and each <br> maps to '\x00'. This matches the
-// character-counting scheme used by saveCaretPos / restoreCaretPos, letting us
-// compare old vs new DOM text to compute remote-insertion cursor adjustments.
-function getDomTextRepr(root) {
-  let result = '';
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT, SKIP_NON_EDITABLE);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.nodeType === 1) {
-      if (node.nodeName === 'BR') result += '\x00';
-    } else {
-      result += node.textContent;
-    }
-  }
-  return result;
 }
 
 /* ── Format toolbar ── */
@@ -772,388 +560,141 @@ function FormatToolbar({ activeFormats, activeStyle, activeList, onFormat, onSty
   );
 }
 
-/* ── Unified editor ── */
+/* ── Unified editor (Tiptap) ── */
 
-function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exportRef }) {
-  const editorRef       = useRef(null);
-  const isApplying      = useRef(false);
-  const undoMgrRef      = useRef(null);
-  const dragStateRef    = useRef(null);
-  const syncFnRef       = useRef(null);
-
-  const [activeFormats, setActiveFormats] = useState({});
+function UnifiedEditor({ doc, tabId, synced, exportRef, provider, displayName, myColor }) {
+  const [activeFormats, setActiveFormats] = useState({ bold: false, italic: false, underline: false, strike: false });
   const [activeStyle,   setActiveStyle]   = useState('p');
-  const [wordCount,     setWordCount]     = useState({ words:0, chars:0 });
-  const [canUndo,       setCanUndo]       = useState(false);
-  const [canRedo,       setCanRedo]       = useState(false);
-  const [domVersion,    setDomVersion]    = useState(0);
+  const [activeList,    setActiveList]    = useState(null);
+  const [wordCount,     setWordCount]     = useState({ words: 0, chars: 0 });
+  const imageInsertRef = useRef(null);
+  const migratedRef    = useRef(false);
 
-  const [activeList,   setActiveList]  = useState(null);
-
-  const yXml = doc.getText(`tab-xml-${tabId}`);
-
-  /* ── Undo manager ── */
-  useEffect(() => {
-    const mgr = new Y.UndoManager(yXml);
-    undoMgrRef.current = mgr;
-    const upd = () => { setCanUndo(mgr.undoStack.length>0); setCanRedo(mgr.redoStack.length>0); };
-    mgr.on('stack-item-added', upd);
-    mgr.on('stack-item-popped', upd);
-    return () => { mgr.off('stack-item-added',upd); mgr.off('stack-item-popped',upd); mgr.destroy(); };
-  }, [yXml]);
-
-  /* ── Migrate old data on first sync ── */
-  useEffect(() => {
-    if (!synced || yXml.length > 0) return;
-    const yArray   = doc.getArray(`tab-list-${tabId}`);
-    const yOldText = doc.getText(`tab-text-${tabId}`);
-
-    if (yArray.length > 0) {
-      const items = yArray.toArray().map(m => ({ text:m.get('text')||'', checked:!!m.get('checked') }));
-      const html = `<ul class="ck">${items.map(i =>
-        `<li class="ck-item"${i.checked?' data-checked="true"':''}>${escHtml(i.text)||'<br>'}</li>`
-      ).join('')}</ul>`;
-      doc.transact(() => { yXml.insert(0, html); });
-      return;
-    }
-    if (yOldText.length > 0) {
-      const html = legacyDeltaToHtml(yOldText.toDelta());
-      if (html) doc.transact(() => { yXml.insert(0, html); });
-    }
-  }, [synced, tabId]);
-
-  /* ── Yjs → DOM ── */
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    if (yXml.length > 0) {
-      el.innerHTML = yXml.toString();
-      injectDragHandles(el);
-    }
-    updateStats();
-
-    const observer = () => {
-      if (isApplying.current) return;
-      const hasFocus = document.activeElement === el;
-      let savedOffset = hasFocus ? saveCaretPos(el) : null;
-
-      isApplying.current = true;
-
-      if (hasFocus && savedOffset !== null) {
-        // Capture the old visible-text representation while the DOM still has
-        // pre-change content, then apply the remote update, then compare to
-        // find how many characters were inserted/deleted before the cursor.
-        const oldRepr = getDomTextRepr(el);
-        el.innerHTML = yXml.toString() || '';
-        injectDragHandles(el);
-        const newRepr = getDomTextRepr(el);
-
-        // Compute common prefix and suffix of the two text representations.
-        let pre = 0;
-        const minLen = Math.min(oldRepr.length, newRepr.length);
-        while (pre < minLen && oldRepr[pre] === newRepr[pre]) pre++;
-        let suf = 0;
-        while (
-          suf < oldRepr.length - pre &&
-          suf < newRepr.length - pre &&
-          oldRepr[oldRepr.length - 1 - suf] === newRepr[newRepr.length - 1 - suf]
-        ) suf++;
-
-        const oldEnd = oldRepr.length - suf; // end of changed region in old text
-        const newEnd = newRepr.length - suf; // end of changed region in new text
-
-        if (savedOffset <= pre) {
-          // Cursor is before the change — no adjustment needed.
-        } else if (savedOffset >= oldEnd) {
-          // Cursor is after the change — shift by the net character delta.
-          savedOffset = Math.max(pre, savedOffset + (newRepr.length - oldRepr.length));
-        } else {
-          // Cursor is inside the changed region — place it at the end of the
-          // inserted content so it doesn't land in the middle of new markup.
-          savedOffset = newEnd;
-        }
-      } else {
-        el.innerHTML = yXml.toString() || '';
-        injectDragHandles(el);
-      }
-
-      isApplying.current = false;
-      if (hasFocus && savedOffset !== null) {
-        // Chrome drops the selection (but not focus) when innerHTML is replaced.
-        // Restore the range directly — calling el.focus() here would reset the
-        // blink timer and cause a visible cursor flash on every remote keystroke.
-        restoreCaretPos(el, savedOffset);
-      }
-      updateStats();
-      setDomVersion(v => v + 1);
-    };
-    yXml.observe(observer);
-    return () => yXml.unobserve(observer);
-  }, [yXml]);
-
-  /* ── Broadcast selection as editor cursor via awareness (100ms throttle) ── */
-  useEffect(() => {
-    const el = editorRef.current;
-    if (!el || !setEditorCursor) return;
-    let last = 0;
-    const onSelection = () => {
-      const now = Date.now();
-      if (now - last < 100) return;
-      last = now;
-      const sel = window.getSelection();
-      if (!sel?.rangeCount) return;
-      if (!el.contains(sel.getRangeAt(0).startContainer)) return;
-      const offset = saveCaretPos(el);
-      if (offset !== null) setEditorCursor(tabId, offset);
-    };
-    document.addEventListener('selectionchange', onSelection);
-    return () => document.removeEventListener('selectionchange', onSelection);
-  }, [tabId, setEditorCursor]);
-
-  /* ── DOM → Yjs ── */
-  function syncToYjs() {
-    const el = editorRef.current;
-    if (!el) return;
-    isApplying.current = true;
-    const html    = getCleanHtml(el);
-    const current = yXml.toString();
-    if (html !== current) {
-      // Minimal diff: find common prefix + suffix, only replace the changed middle.
-      // This lets Yjs CRDT merge concurrent character-level edits correctly instead
-      // of concatenating two full-document replacements.
-      let pre = 0;
-      const minLen = Math.min(html.length, current.length);
-      while (pre < minLen && html[pre] === current[pre]) pre++;
-      let suf = 0;
-      while (suf < html.length - pre && suf < current.length - pre &&
-             html[html.length - 1 - suf] === current[current.length - 1 - suf]) suf++;
-      const delLen = current.length - pre - suf;
-      const ins    = html.slice(pre, html.length - suf);
-      doc.transact(() => {
-        if (delLen > 0) yXml.delete(pre, delLen);
-        if (ins)        yXml.insert(pre, ins);
-      });
-    }
-    // Keep isApplying = true during injectDragHandles: DOM mutations there fire
-    // native `input` events in Chrome which would re-enter handleInput unnecessarily.
-    injectDragHandles(el);
-    isApplying.current = false;
-    updateStats();
-    setDomVersion(v => v + 1);
-  }
-  syncFnRef.current = syncToYjs;
-
-  function updateStats() {
-    const el = editorRef.current;
-    if (!el) return;
-    const text = el.innerText || '';
-    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
-    setWordCount({ words, chars: text.replace(/\s/g,'').length });
-  }
-
-  function updateActiveFormats() {
+  const syncToolbar = useCallback(ed => {
+    if (!ed) return;
     setActiveFormats({
-      bold:      document.queryCommandState('bold'),
-      italic:    document.queryCommandState('italic'),
-      underline: document.queryCommandState('underline'),
-      strike:    document.queryCommandState('strikethrough'),
+      bold:      ed.isActive('bold'),
+      italic:    ed.isActive('italic'),
+      underline: ed.isActive('underline'),
+      strike:    ed.isActive('strike'),
     });
-    const raw = document.queryCommandValue('formatBlock').toLowerCase();
-    setActiveStyle(['h1','h2','h3','pre'].includes(raw) ? raw : 'p');
+    setActiveStyle(
+      ed.isActive('heading', { level: 1 }) ? 'h1' :
+      ed.isActive('heading', { level: 2 }) ? 'h2' :
+      ed.isActive('heading', { level: 3 }) ? 'h3' :
+      ed.isActive('codeBlock') ? 'pre' : 'p'
+    );
+    setActiveList(
+      ed.isActive('taskList')    ? 'checklist' :
+      ed.isActive('orderedList') ? 'numbered' :
+      ed.isActive('bulletList')  ? 'bullet' : null
+    );
+  }, []);
 
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const node = sel.getRangeAt(0).startContainer;
-      const el = node.nodeType === 3 ? node.parentElement : node;
-      if (el?.closest?.('.ck-item')) setActiveList('checklist');
-      else if (el?.closest?.('ol'))  setActiveList('numbered');
-      else if (el?.closest?.('ul'))  setActiveList('bullet');
-      else                           setActiveList(null);
-    } else {
-      setActiveList(null);
-    }
-  }
-
-  /* ── Formatting actions ── */
-
-  function toggleFormat(fmt) {
-    const cmd = { bold:'bold', italic:'italic', underline:'underline', strike:'strikethrough' }[fmt];
-    // Ensure execCommand produces semantic tags (<strong>, <em>) rather than
-    // CSS spans (<span style="font-weight:bold">), which varies by browser.
-    document.execCommand('styleWithCSS', false, false);
-    document.execCommand(cmd, false, null);
-    syncToYjs();
-    updateActiveFormats();
-  }
-
-  function applyStyle(tag) {
-    editorRef.current?.focus();
-    document.execCommand('formatBlock', false, tag);
-    syncToYjs();
-    updateActiveFormats();
-  }
-
-  function exitCkItem(li) {
-    const clone = li.cloneNode(true);
-    clone.querySelectorAll('.ck-drag,.ck-box').forEach(n => n.remove());
-    const p = document.createElement('p');
-    p.innerHTML = clone.innerHTML || '<br>';
-    const list = li.parentElement;
-    list.after(p);
-    li.remove();
-    if (!list.querySelector('li')) list.remove();
-    const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
-    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-  }
-
-  // When a non-collapsed selection spans any list content, first normalize everything
-  // back to plain paragraphs. Returns true if normalization happened (caller should
-  // return early so the user clicks a second time to apply the target list type).
-  function normalizeSelectedListsIfNeeded() {
-    const editor = editorRef.current;
-    const sel = window.getSelection();
-    if (!editor || !sel || !sel.rangeCount || sel.isCollapsed) return false;
-    const range = sel.getRangeAt(0);
-    const affectedLis = [...editor.querySelectorAll('li')].filter(li => range.intersectsNode(li));
-    if (affectedLis.length === 0) return false;
-
-    affectedLis.forEach(li => {
-      const clone = li.cloneNode(true);
-      clone.querySelectorAll('.ck-drag,.ck-box').forEach(n => n.remove());
-      const p = document.createElement('p');
-      p.innerHTML = clone.innerHTML || '<br>';
-      li.replaceWith(p);
-    });
-    editor.querySelectorAll('ul,ol').forEach(list => {
-      if (!list.querySelector('li')) list.remove();
-    });
-    syncToYjs(); updateActiveFormats();
-    return true;
-  }
-
-  function insertBulletList() {
-    if (normalizeSelectedListsIfNeeded()) return;
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    const node = sel.getRangeAt(0).startContainer;
-    const el = node.nodeType === 3 ? node.parentElement : node;
-    const ckLi = el?.closest?.('.ck-item');
-    if (ckLi) exitCkItem(ckLi);
-    document.execCommand('insertUnorderedList', false, null);
-    syncToYjs(); updateActiveFormats();
-  }
-
-  function insertNumberedList() {
-    if (normalizeSelectedListsIfNeeded()) return;
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    const node = sel.getRangeAt(0).startContainer;
-    const el = node.nodeType === 3 ? node.parentElement : node;
-    const ckLi = el?.closest?.('.ck-item');
-    if (ckLi) exitCkItem(ckLi);
-    document.execCommand('insertOrderedList', false, null);
-    syncToYjs(); updateActiveFormats();
-  }
-
-  function insertCheckboxList() {
-    if (normalizeSelectedListsIfNeeded()) return;
-    const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    const node = sel.getRangeAt(0).startContainer;
-    const el = node.nodeType === 3 ? node.parentElement : node;
-
-    // Toggle off if already a checklist item
-    const ckLi = el?.closest?.('.ck-item');
-    if (ckLi) { exitCkItem(ckLi); syncToYjs(); updateActiveFormats(); return; }
-
-    // If in a plain ul/ol, toggle it off first so the next execCommand creates fresh
-    if (el?.closest?.('ul:not(.ck)')) document.execCommand('insertUnorderedList', false, null);
-    else if (el?.closest?.('ol'))     document.execCommand('insertOrderedList',   false, null);
-
-    // Use execCommand to create <ul><li> — preserves text, handles bare nodes & selections
-    document.execCommand('insertUnorderedList', false, null);
-
-    // Post-process: stamp the created <ul><li> with ck class names
-    // and capture a reference to the active <li> so we can restore cursor after sync
-    let targetLi = null;
-    const sel2 = window.getSelection();
-    if (sel2 && sel2.rangeCount) {
-      const n2 = sel2.getRangeAt(0).startContainer;
-      const e2 = n2.nodeType === 3 ? n2.parentElement : n2;
-      const ul = e2?.closest?.('ul');
-      if (ul && !ul.classList.contains('ck')) {
-        ul.classList.add('ck');
-        ul.querySelectorAll('li').forEach(item => {
-          item.className = 'ck-item';
-          item.dataset.checked = 'false';
-        });
-        targetLi = e2?.closest?.('li') || ul.lastElementChild;
-      }
-    }
-
-    syncToYjs(); updateActiveFormats();
-
-    // syncToYjs calls injectDragHandles which prepends .ck-drag/.ck-box spans,
-    // shifting the cursor to the start. Explicitly restore it to end of text content.
-    if (targetLi) {
-      editorRef.current?.focus();
-      // Walk backward past any trailing injected spans to find the last real content node
-      let lastContent = null;
-      for (let i = targetLi.childNodes.length - 1; i >= 0; i--) {
-        const n = targetLi.childNodes[i];
-        if (!(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box')))) {
-          lastContent = n; break;
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ history: false }),
+      Underline,
+      TaskList,
+      TaskItem.configure({ nested: false }),
+      Image.configure({ inline: false, HTMLAttributes: { class: 'editor-img' } }),
+      Collaboration.configure({ document: doc, field: `tab-tiptap-${tabId}` }),
+      CollaborationCursor.configure({
+        provider,
+        user: { name: displayName, color: myColor },
+        render(user) {
+          const caret = document.createElement('span');
+          caret.style.cssText = 'border-left:2px solid;display:inline;position:relative;word-break:normal;pointer-events:none;';
+          caret.style.borderColor = user.color;
+          const label = document.createElement('div');
+          label.style.cssText = [
+            'position:absolute', 'bottom:100%', 'left:-1px',
+            "font-family:'Nunito',sans-serif", 'font-size:10px', 'font-weight:700',
+            `background:${user.color}`,
+            `color:${hexBrightness(user.color) > 128 ? '#111' : '#fff'}`,
+            'padding:1px 4px', 'border-radius:2px 2px 2px 0',
+            'white-space:nowrap', 'pointer-events:none', 'user-select:none', 'line-height:1.4',
+          ].join(';');
+          label.textContent = user.name;
+          caret.appendChild(label);
+          return caret;
+        },
+      }),
+    ],
+    editorProps: {
+      attributes: { class: 'unified-editor' },
+      handlePaste(view, event) {
+        const items = [...(event.clipboardData?.items || [])];
+        const imgItem = items.find(i => i.type.startsWith('image/'));
+        if (imgItem) {
+          imageInsertRef.current?.(imgItem.getAsFile());
+          return true;
         }
-      }
-      const r = document.createRange();
-      if (lastContent?.nodeType === 3) {
-        r.setStart(lastContent, lastContent.textContent.length);
-      } else if (lastContent?.nodeName === 'BR') {
-        r.setStartBefore(lastContent);
-      } else if (lastContent) {
-        r.setStartAfter(lastContent);
+        // Strip HTML from clipboard — paste plain text only
+        const htmlData = event.clipboardData?.getData('text/html');
+        if (htmlData && htmlData.trim()) {
+          const text = event.clipboardData?.getData('text/plain') || '';
+          const tr = view.state.tr;
+          const { from, to, empty } = view.state.selection;
+          if (!empty && text) view.dispatch(tr.replaceWith(from, to, view.state.schema.text(text)));
+          else if (!empty)    view.dispatch(tr.delete(from, to));
+          else if (text)      view.dispatch(tr.insertText(text, from));
+          return true;
+        }
+        return false;
+      },
+      handleDrop(view, event) {
+        const file = [...(event.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+        if (file) { imageInsertRef.current?.(file); return true; }
+        return false;
+      },
+    },
+    onUpdate({ editor: ed }) {
+      const text = ed.getText();
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      setWordCount({ words, chars: text.replace(/\s/g, '').length });
+      syncToolbar(ed);
+    },
+    onSelectionUpdate({ editor: ed }) {
+      syncToolbar(ed);
+    },
+  });
+
+  // Keep CollaborationCursor user info in sync when display name or color changes
+  useEffect(() => {
+    editor?.commands.updateUser({ name: displayName, color: myColor });
+  }, [editor, displayName, myColor]);
+
+  // On first sync: migrate old Y.Text / Y.Array content into the Tiptap Y.XmlFragment
+  useEffect(() => {
+    if (!editor || !synced || migratedRef.current) return;
+    const xmlFrag = doc.getXmlFragment(`tab-tiptap-${tabId}`);
+    if (xmlFrag.length > 0) { migratedRef.current = true; return; }
+
+    let html = '';
+    const yArray = doc.getArray(`tab-list-${tabId}`);
+    if (yArray.length > 0) {
+      const items = yArray.toArray().map(m => ({ text: m.get('text') || '', checked: !!m.get('checked') }));
+      html = `<ul class="ck">${items.map(i =>
+        `<li class="ck-item"${i.checked ? ' data-checked="true"' : ''}>${escHtml(i.text) || '<br>'}</li>`
+      ).join('')}</ul>`;
+    } else {
+      const yText = doc.getText(`tab-xml-${tabId}`);
+      if (yText.length > 0) {
+        html = yText.toString();
       } else {
-        r.selectNodeContents(targetLi); r.collapse(false);
+        const yOldText = doc.getText(`tab-text-${tabId}`);
+        if (yOldText.length > 0) html = legacyDeltaToHtml(yOldText.toDelta());
       }
-      r.collapse(true);
-      window.getSelection()?.removeAllRanges();
-      window.getSelection()?.addRange(r);
     }
-  }
 
-  /* ── Undo / Redo ── */
+    migratedRef.current = true;
+    if (html) requestAnimationFrame(() => editor.commands.setContent(html, false));
+  }, [editor, synced, tabId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function undo() {
-    const mgr = undoMgrRef.current;
-    if (!mgr || mgr.undoStack.length === 0) return;
-    isApplying.current = true;
-    mgr.undo();
-    if (editorRef.current) { editorRef.current.innerHTML = yXml.toString()||''; injectDragHandles(editorRef.current); }
-    isApplying.current = false;
-    if (editorRef.current) updateStats();
-    setDomVersion(v => v + 1);
-    setCanUndo(mgr.undoStack.length>0); setCanRedo(mgr.redoStack.length>0);
-  }
-
-  function redo() {
-    const mgr = undoMgrRef.current;
-    if (!mgr || mgr.redoStack.length === 0) return;
-    isApplying.current = true;
-    mgr.redo();
-    if (editorRef.current) { editorRef.current.innerHTML = yXml.toString()||''; injectDragHandles(editorRef.current); }
-    isApplying.current = false;
-    if (editorRef.current) updateStats();
-    setDomVersion(v => v + 1);
-    setCanUndo(mgr.undoStack.length>0); setCanRedo(mgr.redoStack.length>0);
-  }
-
-  /* ── Image insertion ── */
-
-  function insertImageFile(file) {
-    if (file.size > 500 * 1024) {
-      alert('Image too large (max 500 KB). Please use a smaller image.');
-      return;
-    }
+  function insertImageFromFile(file) {
+    if (!file) return;
+    if (file.size > 500 * 1024) { alert('Image too large (max 500 KB). Please use a smaller image.'); return; }
     const reader = new FileReader();
     reader.onload = ev => {
       const img = new Image();
@@ -1164,296 +705,40 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
         canvas.width  = Math.round(img.width  * scale);
         canvas.height = Math.round(img.height * scale);
         canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        editorRef.current?.focus();
-        document.execCommand('insertHTML', false, `<img class="editor-img" src="${dataUrl}"><br>`);
-        syncToYjs();
+        editor?.chain().focus().setImage({ src: canvas.toDataURL('image/jpeg', 0.85) }).run();
       };
       img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   }
+  imageInsertRef.current = insertImageFromFile;
 
-  /* ── Export ── */
-
-  function handleExport(fmt) {
-    const el = editorRef.current;
-    if (!el) return;
-    const cleanHtml = getCleanHtml(el);
-    let content;
-    if (fmt === 'md') {
-      content = htmlToMarkdown(cleanHtml);
-    } else {
-      const tmp = document.createElement('div');
-      tmp.innerHTML = cleanHtml;
-      content = tmp.innerText;
-    }
-    const blob = new Blob([content], { type: 'text/plain' });
+  function handleExport() {
+    if (!editor) return;
+    const text = editor.getText();
+    const blob = new Blob([text], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `notes.${fmt}`;
+    a.download = 'notes.txt';
     a.click();
     URL.revokeObjectURL(a.href);
   }
-
-  // Expose latest handleExport to parent via ref (stays fresh with closure over editorRef)
   useEffect(() => { if (exportRef) exportRef.current = handleExport; });
 
-  /* ── Event handlers ── */
-
-  const handleInput = useCallback(() => {
-    // Bail out if we're the source of the DOM change (e.g. injectDragHandles firing
-    // a native `input` event on the contentEditable in Chrome).
-    if (isApplying.current) return;
-    syncToYjs();
-    updateActiveFormats();
-  }, [yXml]);
-
-  function handleKeyDown(e) {
-    const mod = e.metaKey || e.ctrlKey;
-
-    // Inline formats
-    if (mod && !e.shiftKey && e.key==='b') { e.preventDefault(); toggleFormat('bold'); return; }
-    if (mod && !e.shiftKey && e.key==='i') { e.preventDefault(); toggleFormat('italic'); return; }
-    if (mod && !e.shiftKey && e.key==='u') { e.preventDefault(); toggleFormat('underline'); return; }
-    if (mod && e.shiftKey && (e.key==='x'||e.key==='X')) { e.preventDefault(); toggleFormat('strike'); return; }
-
-    // Block styles: Cmd+Alt+1/2/3
-    if (mod && e.altKey) {
-      if (e.key==='1') { e.preventDefault(); applyStyle('h1'); return; }
-      if (e.key==='2') { e.preventDefault(); applyStyle('h2'); return; }
-      if (e.key==='3') { e.preventDefault(); applyStyle('p');  return; }
-    }
-
-    // Checkbox list: Cmd+Shift+L
-    if (mod && e.shiftKey && (e.key==='l'||e.key==='L')) { e.preventDefault(); insertCheckboxList(); return; }
-
-    // Undo/Redo
-    if (mod && !e.shiftKey && e.key==='z') { e.preventDefault(); undo(); return; }
-    if (mod && e.shiftKey  && e.key==='z') { e.preventDefault(); redo(); return; }
-
-    if (e.key==='Enter' && !e.shiftKey) {
-      const sel = window.getSelection();
-      if (!sel||!sel.rangeCount) return;
-      const node = sel.getRangeAt(0).startContainer;
-      const el = node.nodeType === 1 ? node : node.parentElement;
-
-      // .ck-item: handle enter ourselves (create next item or exit)
-      const ckLi = el?.closest?.('.ck-item');
-      if (ckLi) {
-        e.preventDefault();
-        const liText = [...ckLi.childNodes]
-          .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
-          .map(n => n.textContent).join('').trim();
-        if (!liText) {
-          const p = document.createElement('p'); p.innerHTML = '<br>';
-          const list = ckLi.parentElement;
-          list.after(p);
-          ckLi.remove();
-          if (!list.children.length) list.remove();
-          syncToYjs();
-          editorRef.current?.focus();
-          const r = document.createRange(); r.setStart(p,0); r.collapse(true);
-          window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
-        } else {
-          const newLi = document.createElement('li');
-          newLi.className = 'ck-item';
-          newLi.dataset.checked = 'false';
-          newLi.innerHTML = '<br>';
-          ckLi.after(newLi);
-          syncToYjs();
-          editorRef.current?.focus();
-          const br = newLi.querySelector('br');
-          const r = document.createRange();
-          if (br) { r.setStartBefore(br); } else { r.selectNodeContents(newLi); r.collapse(false); }
-          r.collapse(true);
-          window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
-        }
-        return;
-      }
-
-      // ul/ol li: empty item → exit list to paragraph
-      const ulLi = el?.closest?.('li');
-      if (ulLi) {
-        const ulLiText = [...ulLi.childNodes]
-          .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
-          .map(n => n.textContent).join('').trim();
-        if (!ulLiText) {
-          e.preventDefault();
-          const p = document.createElement('p'); p.innerHTML = '<br>';
-          const list = ulLi.parentElement;
-          list.after(p);
-          ulLi.remove();
-          if (!list.querySelector('li')) list.remove();
-          syncToYjs();
-          editorRef.current?.focus();
-          const r = document.createRange(); r.setStart(p, 0); r.collapse(true);
-          window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
-          return;
-        }
-        // Non-empty: browser creates next <li>, sync afterward
-        requestAnimationFrame(() => { syncToYjs(); updateActiveFormats(); editorRef.current?.focus(); });
-        return;
-      }
-
-      // Heading: browser creates another heading; convert it to body paragraph
-      if (el?.closest?.('h1,h2,h3')) {
-        requestAnimationFrame(() => {
-          const s2 = window.getSelection();
-          if (!s2 || !s2.rangeCount) return;
-          const n2 = s2.getRangeAt(0).startContainer;
-          const e2 = n2.nodeType === 1 ? n2 : n2.parentElement;
-          if (e2?.closest?.('h1,h2,h3')) document.execCommand('formatBlock', false, 'p');
-          syncToYjs(); updateActiveFormats();
-        });
-        return;
-      }
-
-      // Regular block: browser handles, just keep focus
-      requestAnimationFrame(() => editorRef.current?.focus());
-    }
-  }
-
-  function handleMouseDown(e) {
-    // Checkbox toggle — detect click on .ck-box span
-    const box = e.target instanceof Element ? e.target.closest('.ck-box') : null;
-    if (box) {
-      const li = box.closest('.ck-item');
-      if (!li) return;
-      e.preventDefault();
-      li.dataset.checked = li.dataset.checked === 'true' ? 'false' : 'true';
-      syncToYjs();
-    }
-  }
-
+  // Drag checklist items to calendar
   function handleDragStart(e) {
-    const handle = e.target instanceof Element ? e.target.closest('.ck-drag') : null;
-    if (!handle) return;
-    const li = handle.closest('li');
-    if (!li) return;
-    dragStateRef.current = { li };
-    li.classList.add('ck-item--dragging');
-    e.dataTransfer.effectAllowed = 'copyMove';
-    // Text content excluding injected spans
-    const text = [...li.childNodes]
-      .filter(n => !(n instanceof Element && (n.classList.contains('ck-drag') || n.classList.contains('ck-box'))))
-      .map(n => n.textContent).join('').trim();
-    e.dataTransfer.setData('text/plain', 'ck-reorder');
-    e.dataTransfer.setData('application/x-ck-item', text);
-    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'ck-item', text }));
-    // Custom drag ghost: pill showing the item text
-    const ghost = document.createElement('div');
-    ghost.textContent = text || '•';
-    ghost.style.cssText = [
-      'position:fixed','top:-9999px','left:-9999px',
-      'background:#F9A8D4','color:#1A0A0E',
-      'font-family:Nunito,sans-serif','font-size:12px','font-weight:700',
-      'padding:4px 10px','border-radius:3px','border:2px solid #1A0A0E',
-      'box-shadow:2px 2px 0 #F472B6','white-space:nowrap',
-      'max-width:200px','overflow:hidden','text-overflow:ellipsis',
-      'pointer-events:none',
-    ].join(';');
-    document.body.appendChild(ghost);
-    e.dataTransfer.setDragImage(ghost, 14, 14);
-    requestAnimationFrame(() => document.body.removeChild(ghost));
-  }
-
-  function handleDragOver(e) {
-    if (!dragStateRef.current) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    const el = editorRef.current;
+    const el = e.target instanceof Element ? e.target : null;
     if (!el) return;
-    // Only show drop targets among siblings in the same parent list
-    const parent = dragStateRef.current.li.parentElement;
-    const siblings = parent ? [...parent.querySelectorAll(':scope > li')] : [];
-    el.querySelectorAll('.ck-item--drop-above, .ck-item--drop-below')
-      .forEach(li => li.classList.remove('ck-item--drop-above', 'ck-item--drop-below'));
-    let found = false;
-    for (const li of siblings) {
-      if (li === dragStateRef.current.li) continue;
-      const rect = li.getBoundingClientRect();
-      if (e.clientY < rect.top + rect.height / 2) {
-        li.classList.add('ck-item--drop-above');
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      const last = [...siblings].reverse().find(li => li !== dragStateRef.current.li);
-      if (last) last.classList.add('ck-item--drop-below');
+    // In Tiptap v2, task items are <li data-checked> inside <ul data-type="taskList">
+    const item = el.closest('ul[data-type="taskList"] > li, li[data-checked]');
+    if (!item) return;
+    const contentEl = item.querySelector('div > p') || item.querySelector('div');
+    const text = (contentEl || item).textContent.trim();
+    if (text) {
+      e.dataTransfer.setData('application/json', JSON.stringify({ type: 'ck-item', text }));
+      e.dataTransfer.effectAllowed = 'copyMove';
     }
   }
-
-  function handleDragEnd(e) {
-    const state = dragStateRef.current;
-    dragStateRef.current = null;
-    if (state) state.li.classList.remove('ck-item--dragging');
-    const el = editorRef.current;
-    if (!el) return;
-    el.querySelectorAll('.ck-item--drop-above, .ck-item--drop-below')
-      .forEach(li => li.classList.remove('ck-item--drop-above', 'ck-item--drop-below'));
-    injectDragHandles(el); // re-inject in case browser removed the dragged span
-  }
-
-  function handlePaste(e) {
-    const items = [...(e.clipboardData?.items||[])];
-    const img = items.find(i => i.type.startsWith('image/'));
-    if (img) {
-      e.preventDefault();
-      insertImageFile(img.getAsFile());
-      return;
-    }
-    // Always insert as plain text to strip external HTML formatting
-    e.preventDefault();
-    const text = e.clipboardData?.getData('text/plain') || '';
-    document.execCommand('insertText', false, text);
-    syncToYjs();
-  }
-
-  function handleDrop(e) {
-    // Checklist item reorder
-    if (dragStateRef.current) {
-      e.preventDefault();
-      const el = editorRef.current;
-      if (el) {
-        el.querySelectorAll('.ck-item--drop-above, .ck-item--drop-below')
-          .forEach(li => li.classList.remove('ck-item--drop-above', 'ck-item--drop-below'));
-      }
-      const state = dragStateRef.current;
-      dragStateRef.current = null;
-      state.li.classList.remove('ck-item--dragging');
-      if (el && el.contains(state.li)) {
-        const parent = state.li.parentElement;
-        const allLis = parent ? [...parent.querySelectorAll(':scope > li')] : [];
-        let insertBefore = null;
-        for (const li of allLis) {
-          if (li === state.li) continue;
-          const rect = li.getBoundingClientRect();
-          if (e.clientY < rect.top + rect.height / 2) { insertBefore = li; break; }
-        }
-        if (parent) {
-          let changed = false;
-          if (insertBefore) {
-            if (insertBefore !== state.li && insertBefore.previousElementSibling !== state.li) {
-              parent.insertBefore(state.li, insertBefore);
-              changed = true;
-            }
-          } else if (parent.lastElementChild !== state.li) {
-            parent.appendChild(state.li);
-            changed = true;
-          }
-          if (changed) syncFnRef.current?.();
-        }
-      }
-      return;
-    }
-    // Image file drop
-    const file = [...(e.dataTransfer?.files||[])].find(f => f.type.startsWith('image/'));
-    if (file) { e.preventDefault(); insertImageFile(file); }
-  }
-
-  const myCursors = (editorCursors || []).filter(c => c.tabId === tabId);
 
   return (
     <div className="unified-editor-wrap">
@@ -1461,33 +746,36 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
         activeFormats={activeFormats}
         activeStyle={activeStyle}
         activeList={activeList}
-        onFormat={toggleFormat}
-        onStyle={applyStyle}
+        onFormat={fmt => {
+          if (!editor) return;
+          const c = editor.chain().focus();
+          if (fmt === 'bold')           c.toggleBold().run();
+          else if (fmt === 'italic')    c.toggleItalic().run();
+          else if (fmt === 'underline') c.toggleUnderline().run();
+          else if (fmt === 'strike')    c.toggleStrike().run();
+        }}
+        onStyle={tag => {
+          if (!editor) return;
+          const c = editor.chain().focus();
+          if (tag === 'h1')       c.toggleHeading({ level: 1 }).run();
+          else if (tag === 'h2')  c.toggleHeading({ level: 2 }).run();
+          else if (tag === 'h3')  c.toggleHeading({ level: 3 }).run();
+          else if (tag === 'pre') c.toggleCodeBlock().run();
+          else                    c.setParagraph().run();
+        }}
         onList={type => {
-          if (type === 'bullet') insertBulletList();
-          else if (type === 'numbered') insertNumberedList();
-          else insertCheckboxList();
+          if (!editor) return;
+          const c = editor.chain().focus();
+          if (type === 'bullet')         c.toggleBulletList().run();
+          else if (type === 'numbered')  c.toggleOrderedList().run();
+          else if (type === 'checklist') c.toggleTaskList().run();
         }}
       />
-      <div style={{ display: 'flex', position: 'relative', flex: 1, minHeight: 0, flexDirection: 'column' }}>
-        <div
-          ref={editorRef}
-          className="unified-editor"
-          contentEditable
-          suppressContentEditableWarning
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          onSelect={updateActiveFormats}
-          onMouseUp={updateActiveFormats}
-          onMouseDown={handleMouseDown}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-          onPaste={handlePaste}
-          onDrop={handleDrop}
-          data-placeholder="Start writing..."
-        />
-        <RemoteEditorCursors editorRef={editorRef} cursors={myCursors} domVersion={domVersion} />
+      <div
+        style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', position: 'relative' }}
+        onDragStart={handleDragStart}
+      >
+        <EditorContent editor={editor} style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column' }} />
       </div>
       <div className="word-count">
         {wordCount.words} words · {wordCount.chars} chars
@@ -1496,9 +784,11 @@ function UnifiedEditor({ doc, tabId, synced, editorCursors, setEditorCursor, exp
   );
 }
 
+
+
 /* ── Notes panel ── */
 
-function NotesPanel({ doc, synced, editorCursors, setEditorCursor, exportRef }) {
+function NotesPanel({ doc, synced, editorCursors, setEditorCursor, exportRef, provider, displayName, myColor }) {
   const [tabs,         setTabs]         = useState([]);
   const [activeTabId,  setActiveTabId]  = useState(null);
   const [renamingId,   setRenamingId]   = useState(null);
@@ -1656,12 +946,12 @@ function NotesPanel({ doc, synced, editorCursors, setEditorCursor, exportRef }) 
 
       {!collapsed && (
         <div className="panel__body">
-          {!doc ? (
+          {!doc || !provider ? (
             <div className="notes-connecting">Connecting...</div>
           ) : !activeTab ? (
             <div className="notes-connecting">Loading...</div>
           ) : (
-            <UnifiedEditor key={activeTab.id} doc={doc} tabId={activeTab.id} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor} exportRef={exportRef} />
+            <UnifiedEditor key={activeTab.id} doc={doc} tabId={activeTab.id} synced={synced} exportRef={exportRef} provider={provider} displayName={displayName} myColor={myColor} />
           )}
         </div>
       )}
@@ -1863,7 +1153,7 @@ function RoomMenu({ onCopyLink, onExportIcs, onExportTxt, onRename, onLeave, onD
 /* ── Room content ── */
 
 function RoomContent({ roomId, currentSlug, initialName }) {
-  const { status, users, cursors, editorCursors, doc, synced, displayName, setDisplayName, setCursor, setEditorCursor } = useYjs(roomId);
+  const { status, users, cursors, editorCursors, doc, synced, displayName, setDisplayName, myColor, setCursor, setEditorCursor, wsProvider } = useYjs(roomId);
   const navigate = useNavigate();
   const [online, setOnline] = useState(navigator.onLine);
   const calendarRef = useRef(null);
@@ -2024,7 +1314,7 @@ function RoomContent({ roomId, currentSlug, initialName }) {
             {doc ? <CalendarPanel doc={doc} slug={currentSlug} setCursor={setCursor} exportRef={icsRef}/> : <div className="notes-connecting">Connecting...</div>}
             <CursorOverlay cursors={cursors}/>
           </div>
-          <NotesPanel doc={doc} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor} exportRef={txtRef}/>
+          <NotesPanel doc={doc} synced={synced} editorCursors={editorCursors} setEditorCursor={setEditorCursor} exportRef={txtRef} provider={wsProvider} displayName={displayName} myColor={myColor}/>
         </div>
       </div>
       {leaveConfirmOpen && (

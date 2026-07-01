@@ -1864,11 +1864,13 @@ body {
      line-height: 23px; background-attachment: local; background-position: 0 12px; */
 }
 
-.unified-editor:empty::before {
-  content: attr(data-placeholder);
+.unified-editor.is-editor-empty > p:first-child::before {
+  content: 'Start writing...';
   color: var(--text-2);
   pointer-events: none;
   font-style: italic;
+  float: left;
+  height: 0;
 }
 
 /* Block-level styles */
@@ -1982,67 +1984,168 @@ body {
   line-height: 1;
 }
 
-/* ── Bullet and numbered lists in editor ── */
+/* ── Bullet and numbered lists (Tiptap) ── */
 
-.unified-editor ul:not(.ck) {
+.unified-editor ul:not([data-type="taskList"]):not(.ck) {
   list-style: none;
-  padding-left: 28px;
+  padding-left: 0;
   margin: 0;
 }
 
-.unified-editor ul:not(.ck) > li {
-  position: relative;
+.unified-editor ul:not([data-type="taskList"]):not(.ck) > li {
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 4px;
 }
 
-.unified-editor ul:not(.ck) > li::before {
+.unified-editor ul:not([data-type="taskList"]):not(.ck) > li::before {
   content: '•';
+  flex-shrink: 0;
   color: var(--primary-dk);
+  font-weight: 700;
   font-size: 15px;
-  position: absolute;
-  left: -16px;
+  min-width: 12px;
   line-height: inherit;
+  user-select: none;
 }
 
 .unified-editor ol {
   list-style: none;
-  counter-reset: ol-item;
-  padding-left: 32px;
+  padding-left: 0;
   margin: 0;
+  counter-reset: tiptap-ol;
 }
 
 .unified-editor ol > li {
-  counter-increment: ol-item;
-  position: relative;
   display: flex;
-  align-items: center;
+  align-items: baseline;
+  gap: 4px;
+  counter-increment: tiptap-ol;
 }
 
 .unified-editor ol > li::before {
-  content: counter(ol-item) '.';
+  content: counter(tiptap-ol) '.';
+  flex-shrink: 0;
   color: var(--primary-dk);
   font-weight: 700;
   font-size: 13px;
-  position: absolute;
-  left: -24px;
-  min-width: 20px;
+  min-width: 16px;
   line-height: inherit;
+  user-select: none;
 }
 
-/* Drag handle for bullet/numbered items — pushed to far right */
-.unified-editor ul:not(.ck) > li .ck-drag,
-.unified-editor ol > li .ck-drag {
-  margin-left: auto;
-  padding-left: 8px;
+/* Paragraphs inside list items (Tiptap wraps li content in <p>) */
+.unified-editor li > p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
 }
 
-.unified-editor ul:not(.ck) > li:hover .ck-drag,
-.unified-editor ol > li:hover .ck-drag { opacity: 1; }
+/* ── Tiptap task list ── */
 
-/* Drag states */
+.unified-editor ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+/* In Tiptap v2, task item <li> has data-checked but NOT data-type="taskItem" */
+.unified-editor ul[data-type="taskList"] > li {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 23px;
+  position: relative;
+}
+
+/* Override bullet ::before for items inside task lists */
+.unified-editor ul[data-type="taskList"] > li::before {
+  content: none;
+}
+
+.unified-editor ul[data-type="taskList"] > li > label {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-top: 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.unified-editor ul[data-type="taskList"] > li > label input[type="checkbox"] {
+  display: none;
+}
+
+.unified-editor ul[data-type="taskList"] > li > label > span {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  position: relative;
+}
+
+.unified-editor ul[data-type="taskList"] > li[data-checked="true"] {
+  color: var(--text-2);
+}
+
+.unified-editor ul[data-type="taskList"] > li[data-checked="true"] > div {
+  text-decoration: line-through;
+}
+
+.unified-editor ul[data-type="taskList"] > li[data-checked="true"] > label > span {
+  background: var(--primary-dk);
+  border-color: var(--primary-dk);
+}
+
+.unified-editor ul[data-type="taskList"] > li[data-checked="true"] > label > span::after {
+  content: '✓';
+  color: #fff;
+  font-size: 8px;
+  font-weight: 900;
+  position: absolute;
+  top: -2px;
+  left: 1px;
+  line-height: 1;
+}
+
+.unified-editor ul[data-type="taskList"] > li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.unified-editor ul[data-type="taskList"] > li > div > p {
+  margin: 0;
+  text-decoration: inherit;
+}
+
+/* ── Code block (Monospace style) ── */
+
+.unified-editor pre {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 12px;
+  font-weight: 400;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin: 2px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.unified-editor pre code {
+  font-family: inherit;
+  font-size: inherit;
+  background: none;
+  padding: 0;
+  display: block;
+}
+
+/* Legacy drag states (kept for backward-compat with old migrated content) */
 .unified-editor .ck-item--dragging { opacity: 0.4; }
-.unified-editor .ck-item--dragging .ck-drag { cursor: grabbing; }
 .unified-editor .ck-item--drop-above { border-top: 2px solid var(--primary-dk); }
 .unified-editor .ck-item--drop-below { border-bottom: 2px solid var(--primary-dk); }
 
